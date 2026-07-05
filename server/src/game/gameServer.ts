@@ -376,23 +376,23 @@ export class GameServer {
     return undefined;
   }
 
-  // 玩家按下離開遊戲：對局進行中 → 整場結束、顯示最終計分版給其餘玩家；
-  // 等待中／已結束 → 移除該玩家，全空則回收房間。
+  // 玩家按下離開遊戲：對局進行中（含單局結算）→ 整場結束、顯示最終計分版給其餘玩家
+  // （座位仍對應引擎座位，不可移除，只標記斷線）；
+  // 等待中／已結束 → 真正移除該玩家、釋出座位，房主離開則交棒給下一位，全空才回收房間。
   leaveRoom(playerId: string): Room | undefined {
     const room = this.findRoomByPlayer(playerId);
     if (!room) return undefined;
     const p = room.players.find((x) => x.id === playerId);
-    if (p) {
-      p.connected = false;
-      p.socketId = null;
-      this.tokenIndex.delete(p.token);
-      room.readyIds.delete(p.id);
-      room.engine?.setConnected(playerId, false);
-    }
+    if (!p) return room;
+    this.tokenIndex.delete(p.token);
+    room.readyIds.delete(p.id);
 
     // 對局進行中（含單局結算）有人離開 → 結束整場，準備最終計分版
     if (room.phase === 'PLAYING' || room.phase === 'FINISHED') {
-      this.endGame(room, p?.name ?? '玩家');
+      p.connected = false;
+      p.socketId = null;
+      room.engine?.setConnected(playerId, false);
+      this.endGame(room, p.name);
       // 觸發者仍是全員離線的話直接回收（例如兩人房另一人已斷線）
       if (room.players.every((x) => !x.connected)) {
         this.disposeRoom(room);
@@ -401,11 +401,14 @@ export class GameServer {
       return room;
     }
 
-    // 等待中或已結束：全空則回收房間
-    if (room.players.every((x) => !x.connected)) {
+    // 等待中／已結束：直接移出玩家清單（而非僅標記斷線），座位不再佔用
+    room.players = room.players.filter((x) => x.id !== playerId);
+    if (room.players.length === 0) {
       this.disposeRoom(room);
       return undefined;
     }
+    room.players.forEach((pl, i) => (pl.seat = i)); // 座位壓實，供 roomView／下一位加入對齊
+    if (room.hostId === playerId) room.hostId = room.players[0].id; // 房主離開 → 交棒
     return room;
   }
 
