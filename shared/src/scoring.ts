@@ -4,7 +4,7 @@ import { type Card, kindKey } from './cards.js';
 
 export interface DrawFiveResult {
   cards: Card[]; // 抽出的 5 張（不足 5 張則有幾張算幾張）
-  qualifying: number; // 符合條件（與胡的那張同種）的張數
+  qualifying: number; // 符合條件（與胡牌牌組任一種同種）的張數
   heads: number; // 抽五隻總加頭
 }
 
@@ -39,22 +39,20 @@ export function huKaiBonus(handBefore: Card[], melds: Card[][], winningCard: Car
 }
 
 /**
- * 抽五隻（§9.2）：胡牌後自牌堆抽 5 張，「符合條件」＝與胡的那張同種（同花同牌）。
- * 前四張每張 +1，第五張（最後一張）+2。會消耗傳入的 deck。
+ * 抽五隻（§9.2）：胡牌後自牌堆抽 5 張，「符合條件」＝與胡牌者牌組（五對）
+ * 中任一種同種（同花同牌）。前四張每張 +1，第五張（最後一張）+2。會消耗傳入的 deck。
  */
-export function drawFiveBonus(deck: Card[], winningCard: Card | null): DrawFiveResult {
+export function drawFiveBonus(deck: Card[], winnerCards: Card[]): DrawFiveResult {
   const cards: Card[] = [];
   let qualifying = 0;
   let heads = 0;
-  if (winningCard) {
-    const key = kindKey(winningCard);
-    for (let i = 0; i < 5 && deck.length > 0; i++) {
-      const c = deck.shift()!;
-      cards.push(c);
-      if (kindKey(c) === key) {
-        qualifying++;
-        heads += i === 4 ? 2 : 1; // 最後一張加兩頭
-      }
+  const kinds = new Set(winnerCards.map(kindKey));
+  for (let i = 0; i < 5 && deck.length > 0; i++) {
+    const c = deck.shift()!;
+    cards.push(c);
+    if (kinds.has(kindKey(c))) {
+      qualifying++;
+      heads += i === 4 ? 2 : 1; // 最後一張加兩頭
     }
   }
   return { cards, qualifying, heads };

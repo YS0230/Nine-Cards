@@ -40,7 +40,7 @@ export interface GameApi {
   toast: string | null;
   savedName: string;
   lobby: LobbyRoom[];
-  createRoom: (name: string, isPublic?: boolean) => void;
+  createRoom: (name: string, isPublic?: boolean, hints?: boolean) => void;
   joinRoom: (code: string, name: string) => void;
   quickMatch: (name: string) => void;
   watchLobby: () => void;
@@ -115,9 +115,9 @@ export function useGame(): GameApi {
   const remember = (name: string) => localStorage.setItem(LS_NAME, name.trim().slice(0, 12));
 
   const createRoom = useCallback(
-    (name: string, isPublic = false) => {
+    (name: string, isPublic = false, hints = true) => {
       remember(name);
-      socketRef.current?.emit(EVT.CREATE_ROOM, { name, isPublic }, onJoin);
+      socketRef.current?.emit(EVT.CREATE_ROOM, { name, isPublic, hints }, onJoin);
     },
     [onJoin],
   );

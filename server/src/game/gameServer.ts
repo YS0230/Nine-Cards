@@ -19,6 +19,7 @@ export interface Room {
   id: string;
   code: string;
   isPublic: boolean;
+  hints: boolean; // 新手提示（建房時選擇）：開＝伺服器預檢吃/胡、前端鎖定按鈕
   phase: RoomPhase;
   players: Player[]; // 依加入順序，開局後 seat 對齊索引
   hostId: string | null;
@@ -90,7 +91,7 @@ export class GameServer {
     };
   }
 
-  createRoom(name: string, socketId: string, isPublic = false): JoinOutcome {
+  createRoom(name: string, socketId: string, isPublic = false, hints = true): JoinOutcome {
     const id = randomUUID();
     const code = makeCode(new Set(this.codeIndex.keys()));
     const host = this.newPlayer(name, socketId, 0);
@@ -98,6 +99,7 @@ export class GameServer {
       id,
       code,
       isPublic,
+      hints,
       phase: 'WAITING',
       players: [host],
       hostId: host.id,
@@ -196,7 +198,7 @@ export class GameServer {
     // 本場累計頭數歸零（每位玩家）
     room.scores = new Map(room.players.map((p) => [p.id, 0]));
     // §4.1：第一局由玩家自己抽牌決定莊家（引擎進入 DEAL_DRAW，莊家決定後才發牌）
-    room.engine = new GameEngine(seats, null);
+    room.engine = new GameEngine(seats, null, undefined, room.hints);
     room.lastDealerSeat = 0; // 佔位，莊家決定後於 action() 同步為實際莊家
     room.settled = false;
     room.phase = 'PLAYING';
@@ -262,7 +264,7 @@ export class GameServer {
       prev && prev.nextDealerSeat != null ? prev.nextDealerSeat : room.lastDealerSeat;
     room.lastDealerSeat = dealerSeat;
     const seats: SeatInit[] = room.players.map((p) => ({ id: p.id, name: p.name }));
-    room.engine = new GameEngine(seats, dealerSeat);
+    room.engine = new GameEngine(seats, dealerSeat, undefined, room.hints);
     room.settled = false;
     this.syncScores(room);
     if (room.engine.phase === 'FINISHED') {
@@ -444,6 +446,7 @@ export class GameServer {
       code: room.code,
       phase: room.phase,
       isPublic: room.isPublic,
+      hints: room.hints,
       seats,
       hostId: room.hostId,
       maxPlayers: MAX_PLAYERS,

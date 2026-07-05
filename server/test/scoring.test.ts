@@ -42,10 +42,10 @@ describe('胡開 huKaiBonus（§10.1）', () => {
   });
 });
 
-describe('抽五隻 drawFiveBonus（§9.2，符合條件＝與胡的那張同種）', () => {
+describe('抽五隻 drawFiveBonus（§9.2，符合條件＝與胡牌牌組任一種同種）', () => {
   it('前四張各 +1、命中兩張 → 2 頭', () => {
     const deck = [c('黃', '帥', 2), c('黃', '帥', 3), c('紅', '兵'), c('紅', '兵', 2), c('紅', '兵', 3)];
-    const r = drawFiveBonus(deck, c('黃', '帥', 1));
+    const r = drawFiveBonus(deck, [c('黃', '帥', 1)]);
     expect(r.qualifying).toBe(2);
     expect(r.heads).toBe(2);
     expect(r.cards).toHaveLength(5);
@@ -53,15 +53,21 @@ describe('抽五隻 drawFiveBonus（§9.2，符合條件＝與胡的那張同種
   });
   it('第五張（最後一張）命中 → +2 頭', () => {
     const deck = [c('紅', '兵'), c('紅', '兵', 2), c('紅', '兵', 3), c('紅', '兵', 4), c('黃', '帥', 2)];
-    const r = drawFiveBonus(deck, c('黃', '帥', 1));
+    const r = drawFiveBonus(deck, [c('黃', '帥', 1)]);
     expect(r.qualifying).toBe(1);
     expect(r.heads).toBe(2);
   });
   it('牌堆不足 5 張 → 有幾張算幾張', () => {
     const deck = [c('黃', '帥', 2), c('黃', '帥', 3)];
-    const r = drawFiveBonus(deck, c('黃', '帥', 1));
+    const r = drawFiveBonus(deck, [c('黃', '帥', 1)]);
     expect(r.cards).toHaveLength(2);
     expect(r.heads).toBe(2);
+  });
+  it('命中牌組中非胡牌張的其他對子也加頭', () => {
+    const deck = [c('黃', '仕', 3), c('紅', '兵'), c('紅', '兵', 2), c('紅', '兵', 3), c('紅', '兵', 4)];
+    const r = drawFiveBonus(deck, [c('黃', '帥', 1), c('黃', '仕', 1), c('黃', '仕', 2)]);
+    expect(r.qualifying).toBe(1); // 黃仕在牌組中 → 加頭
+    expect(r.heads).toBe(1);
   });
 });
 
@@ -194,5 +200,29 @@ describe('付款分配', () => {
     const rr = eng.roundResult!;
     expect(rr.breakdown.drawFive).toBe(2); // 最後一張命中 +2
     expect(rr.drawFive!.marks).toEqual([false, false, false, false, true]);
+  });
+
+  it('抽五隻：抽中牌組中其他對子（非胡牌張）也加頭', () => {
+    // 牌組含 黃仕 對子 → 抽到第三張黃仕也符合條件
+    const eng = claimWin('drawn', 1, [c('黃', '仕', 3), c('紅', '兵'), c('紅', '兵', 2), c('紅', '兵', 3), c('紅', '兵', 4)]);
+    expect(eng.apply('1', 'declareWin').ok).toBe(true);
+    for (let i = 0; i < 5; i++) expect(eng.apply('1', 'drawFive').ok).toBe(true);
+    const rr = eng.roundResult!;
+    expect(rr.drawFive!.marks).toEqual([true, false, false, false, false]); // 黃仕命中
+    expect(rr.breakdown.drawFive).toBe(1);
+    expect(rr.heads).toBe(7); // 5（一色）＋1（自摸）＋1（抽五隻）
+  });
+
+  it('結算帶出胡牌者牌組（五對）與胡牌張', () => {
+    const eng = claimWin('discard', 0, []);
+    expect(eng.apply('1', 'declareWin').ok).toBe(true);
+    const rr = eng.roundResult!;
+    expect(rr.winningCard?.id).toBe('黃_帥_1');
+    expect(rr.winnerHand).toHaveLength(10); // 五對
+    // 依牌種排序 → 成對相鄰
+    for (let i = 0; i < 10; i += 2) {
+      expect(rr.winnerHand![i].color).toBe(rr.winnerHand![i + 1].color);
+      expect(rr.winnerHand![i].rank).toBe(rr.winnerHand![i + 1].rank);
+    }
   });
 });

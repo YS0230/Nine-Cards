@@ -30,6 +30,18 @@ export function Table({ api }: { api: GameApi }) {
   const turnName = g.players.find((p) => p.seat === g.currentTurnSeat)?.name ?? '';
   const nameOf = (seat: number) =>
     seat === mySeat ? '你' : (g.players.find((p) => p.seat === seat)?.name ?? `座位${seat}`);
+  // 相對位置標示（順時鐘換人 → 距離 1＝下家、n-1＝上家）：
+  // 兩人＝對家；三人＝上、下家；四人＝上、對、下家
+  const relationOf = (seat: number): string => {
+    const n = g.players.length;
+    const d = (seat - mySeat + n) % n;
+    if (n === 2) return '對家';
+    if (n === 3) return d === 1 ? '下家' : '上家';
+    return d === 1 ? '下家' : d === 2 ? '對家' : '上家';
+  };
+  // 新手提示關閉：吃/胡按鈕不自動鎖定（相公、對局結束除外），按下後由伺服器判定
+  const eatEnabled = g.hints ? canEat : !myXianggong && g.phase === 'PLAYING';
+  const winEnabled = g.hints ? canWin : !myXianggong && g.phase === 'PLAYING';
 
   // ── 摸牌/出牌時：先在主畫面「翻牌」跳一下，再落入桌面 ──
   const [reveal, setReveal] = useState<{ card: CardT; label: string } | null>(null);
@@ -100,13 +112,14 @@ export function Table({ api }: { api: GameApi }) {
     if (window.confirm('確定要離開這場遊戲嗎？')) api.leave();
   };
 
+  // 提示關閉時不揭露「你可以吃/胡」，僅提示視窗開著、由玩家自行判斷
   const prompt = myXianggong
     ? '你已相公（逾時未吃），本局僅能觀看'
-    : canWin
+    : g.hints && canWin
     ? '你可以胡牌！'
     : canPass
       ? '自摸！可吃請按「吃」，不吃就點中央那張打出'
-      : canEat
+      : g.hints && canEat
         ? '有人出牌，要吃請按「吃」'
         : canDraw
           ? g.pendingClaim
@@ -118,7 +131,9 @@ export function Table({ api }: { api: GameApi }) {
               : selected
                 ? '按「打出」送出這張牌'
                 : '點選一張要打出的牌'
-            : `等待 ${turnName} 行動…`;
+            : !g.hints && g.pendingClaim
+              ? '要吃／胡請自行按按鈕，由系統判定'
+              : `等待 ${turnName} 行動…`;
 
   return (
     <div className="table">
@@ -139,7 +154,12 @@ export function Table({ api }: { api: GameApi }) {
 
       <section className="opponents">
         {opponents.map((p) => (
-          <OpponentSeat key={p.id} p={p} active={p.seat === g.currentTurnSeat} />
+          <OpponentSeat
+            key={p.id}
+            p={p}
+            relation={relationOf(p.seat)}
+            active={p.seat === g.currentTurnSeat}
+          />
         ))}
       </section>
 
@@ -243,10 +263,10 @@ export function Table({ api }: { api: GameApi }) {
           >
             打出
           </button>
-          <button className="btn act" disabled={!canEat} onClick={() => api.act('eat')}>
+          <button className="btn act" disabled={!eatEnabled} onClick={() => api.act('eat')}>
             吃
           </button>
-          <button className="btn win act" disabled={!canWin} onClick={() => api.act('declareWin')}>
+          <button className="btn win act" disabled={!winEnabled} onClick={() => api.act('declareWin')}>
             胡！
           </button>
         </div>
@@ -446,7 +466,7 @@ function DrawFivePanel({
         <h2>抽五隻</h2>
         <div className="df-hint">
           {whoName} 胡「{drawFive.winningCard.color}
-          {drawFive.winningCard.rank}」，抽五張；抽中同種即加頭
+          {drawFive.winningCard.rank}」，抽五張；抽中與胡牌牌組同種即加頭
         </div>
         <div className="df-progress">
           已抽 {drawFive.drawn} / {drawFive.total}　中 {qualified} 張
@@ -498,6 +518,13 @@ function RoundResult({
   const nameOf = (seat: number) => players.find((p) => p.seat === seat)?.name ?? `座位${seat}`;
   const deltaOf = (seat: number) =>
     result.payments.find((p) => p.seat === seat)?.delta ?? 0;
+  // 胡牌者牌組（伺服器已依牌種排序）→ 兩張一組顯示五對；胡的那張加標記
+  const winnerPairs: CardT[][] = [];
+  if (result.winnerHand) {
+    for (let i = 0; i < result.winnerHand.length; i += 2) {
+      winnerPairs.push(result.winnerHand.slice(i, i + 2));
+    }
+  }
   const rows =
     result.scores.length > 0
       ? result.scores
@@ -514,6 +541,26 @@ function RoundResult({
         {result.reason === 'win' && (
           <>
             <div className="result-cat">{result.category}｜共 {result.heads} 頭</div>
+            {/* 胡牌者的完整牌組（五對）；胡的那張以「胡」標記 */}
+            {winnerPairs.length > 0 && (
+              <div className="result-hand">
+                {winnerPairs.map((pair, i) => (
+                  <div className="result-pair" key={`wp${i}`}>
+                    {pair.map((card) => (
+                      <div
+                        className={`df-slot ${card.id === result.winningCard?.id ? 'hit' : ''}`}
+                        key={card.id}
+                      >
+                        <Card card={card} small />
+                        {card.id === result.winningCard?.id && (
+                          <span className="df-badge">胡</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            )}
             <div className="result-breakdown">
               {result.breakdown.color === 0
                 ? '四色 → 0 頭（不加頭、不抽五隻）'
@@ -616,10 +663,19 @@ function CountdownBar({ endsAt }: { endsAt: number }) {
   );
 }
 
-function OpponentSeat({ p, active }: { p: PublicPlayer; active: boolean }) {
+function OpponentSeat({
+  p,
+  relation,
+  active,
+}: {
+  p: PublicPlayer;
+  relation: string; // 相對位置：上家／對家／下家
+  active: boolean;
+}) {
   return (
     <div className={`opp ${active ? 'active' : ''}`}>
       <div className="opp-head">
+        <span className="rel-badge">{relation}</span>
         {p.isDealer && '👑 '}
         {p.name}
         {p.isTenpai && <span className="tenpai-badge">聽</span>}

@@ -970,3 +970,51 @@ body {
   color: var(--gold);
   font-weight: 700;
 }
+
+/* ── 對手相對位置標示（上家／對家／下家）──────────── */
+.rel-badge {
+  margin-right: 6px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.18);
+  color: var(--paper);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+/* ── 結算畫面：胡牌者的五對牌組 ─────────────────── */
+.result-hand {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.result-pair {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  background: rgba(232, 182, 12, 0.18);
+  border-radius: 6px;
+}
+
+/* ── 建房選項：新手提示勾選 ─────────────────────── */
+.field-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  max-width: 320px;
+  font-size: 14px;
+  cursor: pointer;
+}
+.field-check input {
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+  accent-color: var(--gold);
+}
+.field-check small {
+  display: block;
+  font-size: 12px;
+  opacity: 0.7;
+}

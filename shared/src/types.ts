@@ -18,6 +18,7 @@ export interface RoomView {
   code: string; // 分享用房號
   phase: RoomPhase;
   isPublic: boolean;
+  hints: boolean; // 新手提示：伺服器預先檢核可吃/可胡並鎖定按鈕（建房時選擇）
   seats: RoomSeat[];
   hostId: string | null;
   maxPlayers: number;
@@ -65,7 +66,7 @@ export interface DrawFiveEntry {
 export interface DrawFiveView {
   winnerSeat: number;
   winnerName: string;
-  winningCard: Card; // 胡的那張（判定加頭的依據）
+  winningCard: Card; // 胡的那張（顯示用；加頭依據為胡牌者整副牌組任一種）
   entries: DrawFiveEntry[]; // 已抽出的牌（依序）
   drawn: number; // 已抽張數
   total: number; // 目標張數（5，或受牌堆剩餘限制）
@@ -99,6 +100,7 @@ export interface PersonalGameState {
   paused: boolean; // 有玩家斷線 → 全體暫停，等待重連（由 gameServer 填入）
   disconnectedNames: string[]; // 目前斷線中的玩家名稱（暫停遮罩顯示用）
   legalActions: ActionType[]; // 伺服器告訴你此刻可做的動作
+  hints: boolean; // 新手提示：開＝依 legalActions 鎖定吃/胡按鈕；關＝按鈕不鎖、由伺服器判定
   winnerSeat: number | null;
   message: string | null;
 }
@@ -124,6 +126,8 @@ export interface GameOverPayload {
   breakdown: { color: number; huKai: number; selfDraw: number; drawFive: number };
   // 抽五隻揭示（不符資格為 null）：marks[i]＝該張是否符合加頭（§9.2）
   drawFive: { cards: Card[]; qualifying: number; marks: boolean[] } | null;
+  winnerHand: Card[] | null; // 胡牌者的完整牌組（五對，含吃牌對子；依牌種排序）；流局為 null
+  winningCard: Card | null; // 胡的那張（結算畫面高亮用；天胡/流局為 null）
   payments: PaymentEntry[]; // 本局各座位頭數變化
   scores: ScoreEntry[]; // 跨局累計（由 gameServer 填入）
   nextDealerSeat: number | null; // 下一局莊家（由 gameServer 填入）

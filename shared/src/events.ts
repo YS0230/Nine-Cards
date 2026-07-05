@@ -41,6 +41,7 @@ export interface JoinResult {
 export interface CreateRoomReq {
   name: string;
   isPublic?: boolean;
+  hints?: boolean; // 新手提示（預設開）：伺服器預檢吃/胡並鎖定按鈕
 }
 export interface JoinRoomReq {
   code: string;

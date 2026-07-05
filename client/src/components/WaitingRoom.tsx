@@ -15,7 +15,10 @@ export function WaitingRoom({ api }: { api: GameApi }) {
         ← 離開
       </button>
       <h2>房間 {room.code}</h2>
-      <p className="subtitle">{room.isPublic ? '公開房' : '私人房'}・分享房號給朋友加入</p>
+      <p className="subtitle">
+        {room.isPublic ? '公開房' : '私人房'}・新手提示{room.hints ? '開' : '關'}
+        ・分享房號給朋友加入
+      </p>
 
       <button
         className="btn small"

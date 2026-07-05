@@ -68,6 +68,7 @@ type Stage = 'DEAL_DRAW' | 'DRAW' | 'CLAIM' | 'EATING' | 'DISCARD' | 'DRAW_FIVE'
 interface DrawFiveState {
   winnerSeat: number;
   winningCard: Card;
+  kinds: Set<string>; // 胡牌者牌組（五對）的牌種：抽中任一種即加頭
   entries: { card: Card; qualifying: boolean; heads: number }[];
 }
 
@@ -79,6 +80,7 @@ interface PendingWin {
   huKai: number; // §10.1 胡開頭數
   selfDraw: number; // 自摸加頭（自摸 1、否則 0）
   loserSeat: number | null; // 放槍者（抽五隻情境固定為 null）
+  winningCard: Card | null; // 胡的那張（結算畫面顯示用）
 }
 
 interface Pending {
@@ -141,12 +143,21 @@ export class GameEngine {
 
   private readonly n: number;
   private readonly rng: () => number;
+  // 新手提示（建房選項）：開＝沒人能吃/胡就不開吃牌窗、legalActions 供前端鎖定按鈕；
+  // 關＝每張牌都開吃牌窗，玩家自行判斷按吃/胡，按下後才由伺服器驗證
+  readonly hints: boolean;
 
   // dealerSeat=null：開局由玩家自己抽牌決定莊家（§4.1，僅第一局）；
   // 傳入座位號：直接指定莊家並發牌（續局／測試用）。
-  constructor(seats: SeatInit[], dealerSeat: number | null, rng: () => number = Math.random) {
+  constructor(
+    seats: SeatInit[],
+    dealerSeat: number | null,
+    rng: () => number = Math.random,
+    hints = true,
+  ) {
     this.n = seats.length;
     this.rng = rng;
+    this.hints = hints;
     this.tenpai = new Array(this.n).fill(false);
     this.xianggong = new Array(this.n).fill(false);
     this.players = seats.map((s, seat) => ({
@@ -304,8 +315,10 @@ export class GameEngine {
     this.tentative = null;
     this.protectedSelfEat = false;
 
-    if (this.claimOrder.length === 0) {
-      this.resolveNoClaim(); // 沒人能吃 → 直接落桌、換人
+    // 新手提示開：沒人能吃/胡就不開窗，直接落桌、換人（提示效果：窗開著＝有人能吃）。
+    // 提示關：每張牌都照常開限時窗，玩家自行判斷按吃/胡（按下後由伺服器驗證）。
+    if (this.hints && this.claimOrder.length === 0) {
+      this.resolveNoClaim();
       return;
     }
     this.stage = 'CLAIM';
@@ -658,7 +671,7 @@ export class GameEngine {
 
     // 四色（0 頭）：直接以 0 頭結算，不加胡開/自摸頭、也不抽五隻（§11）
     if (color === 0) {
-      this.finishWith(this.assembleResult(seat, label, 0, 0, 0, [], loserSeat, false));
+      this.finishWith(this.assembleResult(seat, label, 0, 0, 0, [], loserSeat, false, winningCard));
       this.message = `${winner.name} ${label}胡牌！（四色 0 頭）`;
       return;
     }
@@ -671,15 +684,21 @@ export class GameEngine {
       // 進入手動抽五隻：由胡牌者一張一張抽，抽完才結算（不先設 FINISHED）
       this.stage = 'DRAW_FIVE';
       this.turnSeat = seat;
-      this.pendingWin = { seat, label, color, huKai, selfDraw, loserSeat };
-      this.drawFive = { winnerSeat: seat, winningCard, entries: [] };
+      this.pendingWin = { seat, label, color, huKai, selfDraw, loserSeat, winningCard };
+      this.drawFive = {
+        winnerSeat: seat,
+        winningCard,
+        // 加頭條件：抽中胡牌者牌組（五對）中任一種（同花同牌，§9.2）
+        kinds: new Set(this.ownedCards(winner).map(kindKey)),
+        entries: [],
+      };
       this.message = `${winner.name} ${label}胡牌！請抽五隻`;
       return;
     }
     // 放槍／天胡／牌堆已空：無抽五隻，直接結算
     const showDrawFive = eligible; // 有資格但牌堆已空 → 仍揭示（空的）抽五隻
     this.finishWith(
-      this.assembleResult(seat, label, color, huKai, selfDraw, [], loserSeat, showDrawFive),
+      this.assembleResult(seat, label, color, huKai, selfDraw, [], loserSeat, showDrawFive, winningCard),
     );
     this.message = `${winner.name} ${label}胡牌！`;
   }
@@ -691,7 +710,7 @@ export class GameEngine {
     }
     if (this.deck.length === 0) return { ok: false, error: '牌堆已無牌可抽' };
     const card = this.deck.shift()!;
-    const qualifying = kindKey(card) === kindKey(this.drawFive.winningCard);
+    const qualifying = this.drawFive.kinds.has(kindKey(card)); // 符合牌組任一種即加頭
     const index = this.drawFive.entries.length; // 0..4
     const heads = qualifying ? (index === 4 ? 2 : 1) : 0; // 第五張（最後一張）符合加兩頭
     this.drawFive.entries.push({ card, qualifying, heads });
@@ -707,7 +726,9 @@ export class GameEngine {
     const pw = this.pendingWin!;
     const entries = this.drawFive!.entries;
     this.finishWith(
-      this.assembleResult(pw.seat, pw.label, pw.color, pw.huKai, pw.selfDraw, entries, pw.loserSeat, true),
+      this.assembleResult(
+        pw.seat, pw.label, pw.color, pw.huKai, pw.selfDraw, entries, pw.loserSeat, true, pw.winningCard,
+      ),
     );
     this.message = `${this.players[pw.seat].name} ${pw.label}胡牌！`;
   }
@@ -733,10 +754,15 @@ export class GameEngine {
     entries: { card: Card; qualifying: boolean; heads: number }[],
     loserSeat: number | null,
     showDrawFive: boolean,
+    winningCard: Card | null,
   ): GameOverPayload {
     const winner = this.players[seat];
     const dfHeads = entries.reduce((s, e) => s + e.heads, 0);
     const heads = color + huKai + selfDraw + dfHeads;
+    // 胡牌者的完整牌組（五對）：依牌種排序讓成對的牌相鄰，供結算畫面展示
+    const winnerHand = [...this.ownedCards(winner)].sort((a, b) =>
+      kindKey(a) === kindKey(b) ? a.id.localeCompare(b.id) : kindKey(a).localeCompare(kindKey(b)),
+    );
 
     // 付款：放槍只有放槍者付；自摸／摸牌胡則其餘全體各付一份（§11 勝負計算）
     const payers =
@@ -762,6 +788,8 @@ export class GameEngine {
             marks: entries.map((e) => e.qualifying),
           }
         : null,
+      winnerHand,
+      winningCard,
       payments,
       scores: [], // gameServer 補跨局累計
       nextDealerSeat: seat, // 胡牌者下一局當莊（§4.2）
@@ -777,6 +805,8 @@ export class GameEngine {
       heads: 0,
       breakdown: { color: 0, huKai: 0, selfDraw: 0, drawFive: 0 },
       drawFive: null,
+      winnerHand: null,
+      winningCard: null,
       payments: this.players.map((p) => ({ seat: p.seat, delta: 0 })),
       scores: [],
       nextDealerSeat: null, // gameServer：原莊連任（§4.2）
@@ -863,6 +893,7 @@ export class GameEngine {
       paused: false, // 由 index 依房間 paused 補上（引擎不知房間層斷線狀態）
       disconnectedNames: [], // 由 index 依房間斷線玩家補上
       legalActions: this.legalActionsFor(me.seat),
+      hints: this.hints,
       winnerSeat: this.winnerSeat,
       message: this.message,
     };

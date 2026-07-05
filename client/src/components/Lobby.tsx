@@ -9,6 +9,7 @@ export function Lobby({ api }: { api: GameApi }) {
   const [name, setName] = useState(api.savedName);
   const [code, setCode] = useState(urlCode);
   const [mode, setMode] = useState<Mode>(urlCode ? 'join' : 'menu');
+  const [hints, setHints] = useState(true); // 建房選項：新手提示（可吃/胡才啟用按鈕）
 
   const nameOk = name.trim().length > 0;
 
@@ -40,11 +41,31 @@ export function Lobby({ api }: { api: GameApi }) {
       {mode === 'menu' && (
         <>
           <div className="menu">
-            <button className="btn primary" disabled={!nameOk} onClick={() => api.createRoom(name, true)}>
+            {/* 建房選項：新手提示（關閉時吃/胡按鈕不自動鎖定，按下後由伺服器判定） */}
+            <label className="field-check">
+              <input
+                type="checkbox"
+                checked={hints}
+                onChange={(e) => setHints(e.target.checked)}
+              />
+              <span>
+                新手提示
+                <small>開：可吃/胡時才能按按鈕；關：按鈕不鎖定，由伺服器判定</small>
+              </span>
+            </label>
+            <button
+              className="btn primary"
+              disabled={!nameOk}
+              onClick={() => api.createRoom(name, true, hints)}
+            >
               建立公開房
             </button>
             <div className="menu-row">
-              <button className="btn" disabled={!nameOk} onClick={() => api.createRoom(name, false)}>
+              <button
+                className="btn"
+                disabled={!nameOk}
+                onClick={() => api.createRoom(name, false, hints)}
+              >
                 建立私人房
               </button>
               <button className="btn" disabled={!nameOk} onClick={() => setMode('join')}>
