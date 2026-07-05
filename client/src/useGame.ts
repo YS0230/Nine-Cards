@@ -10,9 +10,11 @@ import {
   type LobbyRoom,
 } from '@nine-cards/shared';
 
-const SERVER_URL =
+// 開發模式下前端(5173)與 server(3001)不同埠，需指定位址；
+// 正式部署時 server 直接供應 client build，同源連線交給 socket.io-client 預設行為(undefined)。
+const SERVER_URL: string | undefined =
   (import.meta.env.VITE_SERVER_URL as string | undefined) ??
-  `http://${location.hostname}:3001`;
+  (import.meta.env.DEV ? `http://${location.hostname}:3001` : undefined);
 
 const LS_TOKEN = 'nineCards.token';
 const LS_NAME = 'nineCards.name';

@@ -1,5 +1,8 @@
 import express from 'express';
 import { createServer } from 'node:http';
+import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
 import { Server } from 'socket.io';
 import { GameServer, type Room } from './game/gameServer.js';
 import {
@@ -22,6 +25,16 @@ const io = new Server(httpServer, {
 const game = new GameServer();
 
 app.get('/health', (_req, res) => res.json({ ok: true }));
+
+// 正式部署(單一 service)：server 直接供應 client build 出來的靜態檔案
+const clientDist = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../client/dist');
+if (existsSync(clientDist)) {
+  app.use(express.static(clientDist));
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/socket.io') || req.path === '/health') return next();
+    res.sendFile(path.join(clientDist, 'index.html'));
+  });
+}
 
 // 把最新公開大廳清單推給所有在「大廳」的連線
 function broadcastLobby() {
