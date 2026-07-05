@@ -9,7 +9,13 @@ export function Table({ api }: { api: GameApi }) {
   const [selected, setSelected] = useState<string | null>(null);
 
   const mySeat = g.you.seat;
-  const opponents = g.players.filter((p) => p.seat !== mySeat).sort((a, b) => a.seat - b.seat);
+  const seatCount = g.players.length;
+  // 逆時鐘輪替：我到對方的輪替距離（1＝下家、n-1＝上家）
+  const turnDist = (seat: number) => (mySeat - seat + seatCount) % seatCount;
+  // 排列如實體牌桌視角：左＝上家、中＝對家、右＝下家（距離大→小）
+  const opponents = g.players
+    .filter((p) => p.seat !== mySeat)
+    .sort((a, b) => turnDist(b.seat) - turnDist(a.seat));
   const me = g.players.find((p) => p.seat === mySeat);
   const myScore = me?.score ?? 0;
   const myTenpai = me?.isTenpai ?? false;
@@ -30,14 +36,14 @@ export function Table({ api }: { api: GameApi }) {
   const turnName = g.players.find((p) => p.seat === g.currentTurnSeat)?.name ?? '';
   const nameOf = (seat: number) =>
     seat === mySeat ? '你' : (g.players.find((p) => p.seat === seat)?.name ?? `座位${seat}`);
-  // 相對位置標示（順時鐘換人 → 距離 1＝下家、n-1＝上家）：
+  // 相對位置標示（逆時鐘換人 → 輪替距離 1＝下家、n-1＝上家）：
   // 兩人＝對家；三人＝上、下家；四人＝上、對、下家
   const relationOf = (seat: number): string => {
-    const n = g.players.length;
-    const d = (seat - mySeat + n) % n;
-    if (n === 2) return '對家';
-    if (n === 3) return d === 1 ? '下家' : '上家';
-    return d === 1 ? '下家' : d === 2 ? '對家' : '上家';
+    if (seatCount === 2) return '對家';
+    const d = turnDist(seat);
+    if (d === 1) return '下家';
+    if (d === seatCount - 1) return '上家';
+    return '對家';
   };
   // 新手提示關閉：吃/胡按鈕不自動鎖定（相公、對局結束除外），按下後由伺服器判定
   const eatEnabled = g.hints ? canEat : !myXianggong && g.phase === 'PLAYING';

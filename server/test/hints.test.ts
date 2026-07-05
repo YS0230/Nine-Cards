@@ -49,7 +49,7 @@ describe('新手提示（建房選項）', () => {
     expect(eng.apply('0', 'discard', '黃_帥_1').ok).toBe(true);
     expect(eng.stage).toBe('DRAW'); // 沒開窗
     expect(eng.discardPile.map((x) => x.id)).toContain('黃_帥_1');
-    expect(eng.turnSeat).toBe(1);
+    expect(eng.turnSeat).toBe(2); // 逆時鐘：seat0 的下家＝seat2
   });
 
   it('提示關：沒人能吃也開限時窗，按吃由伺服器判定駁回', () => {
@@ -64,9 +64,9 @@ describe('新手提示（建房選項）', () => {
     expect(eat.error).toBe('現在無法執行此動作');
     // 亂按「胡」也駁回
     expect(eng.apply('2', 'declareWin').ok).toBe(false);
-    // 時間到後下一家摸牌關窗 → 原牌落桌
+    // 時間到後下家（逆時鐘＝seat2）摸牌關窗 → 原牌落桌
     eng.claimEndsAt = 0;
-    expect(eng.apply('1', 'draw').ok).toBe(true);
+    expect(eng.apply('2', 'draw').ok).toBe(true);
     expect(eng.discardPile.map((x) => x.id)).toContain('黃_帥_1');
     // 沒人被判相公（claimOrder 為空，無逾時未吃者）
     expect(eng.xianggong.every((x) => !x)).toBe(true);
@@ -80,16 +80,16 @@ describe('新手提示（建房選項）', () => {
 
   it('提示關＋下家相公：摸牌權跳過相公給再下一家，遊戲不卡死', () => {
     const eng = setupNoClaimDiscard(false);
-    eng.xianggong[1] = true; // 下家（seat1）已相公
+    eng.xianggong[2] = true; // 下家（逆時鐘＝seat2）已相公
     expect(eng.apply('0', 'discard', '黃_帥_1').ok).toBe(true);
     expect(eng.stage).toBe('CLAIM');
     eng.claimEndsAt = 0; // 時間到
-    // 相公本人不能有任何動作；摸牌權跳過他、落在 seat2
-    expect(eng.legalActionsFor(1)).toEqual([]);
-    expect(eng.legalActionsFor(2)).toContain('draw');
-    expect(eng.apply('2', 'draw').ok).toBe(true);
+    // 相公本人不能有任何動作；摸牌權跳過他、落在 seat1
+    expect(eng.legalActionsFor(2)).toEqual([]);
+    expect(eng.legalActionsFor(1)).toContain('draw');
+    expect(eng.apply('1', 'draw').ok).toBe(true);
     expect(eng.discardPile.map((x) => x.id)).toContain('黃_帥_1');
-    expect(eng.turnSeat).toBe(2); // 換到 seat2（跳過相公）
+    expect(eng.turnSeat).toBe(1); // 換到 seat1（跳過相公）
   });
 });
 

@@ -1,5 +1,5 @@
 // 權威遊戲引擎（MVP 核心循環）
-// 覆蓋：發牌、摸牌公開、自摸/放槍胡牌、吃牌、打牌、換人、流局、
+// 覆蓋：發牌、摸牌公開、自摸/放槍胡牌、吃牌、打牌、換人（逆時鐘）、流局、
 //       死牌先進先出、聽牌宣告、依顏色計分、胡開、胡牌者手動抽五隻。
 //
 // 吃牌規則（依需求）：
@@ -270,8 +270,9 @@ export class GameEngine {
     return [...p.hand, ...p.melds.flat()];
   }
 
+  // 逆時鐘換人（§6）：下一位＝座位號 -1
   private nextSeat(seat: number): number {
-    return (seat + 1) % this.n;
+    return (seat + this.n - 1) % this.n;
   }
 
   // 下一位「可行動」的座位：跳過相公（相公本局不摸牌、不出牌）
@@ -281,9 +282,10 @@ export class GameEngine {
     return s;
   }
 
-  private clockwiseDistance(fromSeat: number, seat: number, includeSelf: boolean): number {
+  // 依逆時鐘輪替方向計算 fromSeat 到 seat 的距離（1＝下家；下家優先用，§7.2）
+  private turnDistance(fromSeat: number, seat: number, includeSelf: boolean): number {
     if (seat === fromSeat) return includeSelf ? 0 : Infinity;
-    return (seat - fromSeat + this.n) % this.n;
+    return (fromSeat - seat + this.n) % this.n;
   }
 
   private priorityIndex(seat: number): number {
@@ -314,8 +316,8 @@ export class GameEngine {
       else if (hasMatch(p.hand, card)) eaters.push(p.seat);
     }
     const byDistance = (a: number, b: number) =>
-      this.clockwiseDistance(fromSeat, a, includeOfferer) -
-      this.clockwiseDistance(fromSeat, b, includeOfferer);
+      this.turnDistance(fromSeat, a, includeOfferer) -
+      this.turnDistance(fromSeat, b, includeOfferer);
     winners.sort(byDistance);
     eaters.sort(byDistance);
     this.claimOrder = [...winners, ...eaters];
@@ -646,7 +648,7 @@ export class GameEngine {
     return { ok: true };
   }
 
-  // 無人宣告 → 待宣告的牌進棄牌區（落在桌面），換下一位摸牌（§6.5/§6.6）
+  // 無人宣告 → 待宣告的牌進棄牌區（落在桌面），逆時鐘換下一位摸牌（§6.5/§6.6）
   private resolveNoClaim() {
     if (this.pending) {
       this.discardPile.push(this.pending.card);

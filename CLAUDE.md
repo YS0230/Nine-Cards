@@ -84,7 +84,7 @@ the turn advances). Key rules encoded in `engine.ts` — preserve them when edit
 
 - Eat is **tentative until the eater discards**: a higher-priority eligible player can still `eat`
   to bump a lower-priority holder (who yields, meld reverted). Priority = hu > eat, then 下家優先
-  (clockwise distance), captured in `claimOrder`.
+  (counter-clockwise turn order: next seat = seat−1), captured in `claimOrder`.
 - The **next non-xianggong player may only `draw` after the claim window (per-room seconds chosen
   at room creation, default 5000ms / `CLAIM_WINDOW_MS` env override) AND no one has claimed**;
   drawing then closes the window (unclaimed card → discard). With the room's 新手提示 (hints)

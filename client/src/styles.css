@@ -267,6 +267,9 @@ body {
   overflow-x: auto;
   flex: 0 0 auto;
   max-height: 28vh;
+  /* 依牌桌視角置中排列：上家｜對家｜下家（兩人時對家居中）；
+     safe：內容超寬時退回靠左，避免與 overflow-x 衝突截掉左緣 */
+  justify-content: safe center;
 }
 .opp {
   background: rgba(0, 0, 0, 0.22);
