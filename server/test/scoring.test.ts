@@ -156,8 +156,10 @@ describe('付款分配', () => {
     expect(rr.drawFive).not.toBeNull();
     expect(rr.drawFive!.marks).toEqual([true, true, false, false, false]); // 前兩張黃帥加頭
     expect(rr.breakdown.color).toBe(5);
+    expect(rr.breakdown.colorCount).toBe(1); // 一色
     expect(rr.breakdown.selfDraw).toBe(1); // 自摸加一頭
-    expect(rr.breakdown.drawFive).toBe(2); // 命中兩張黃帥
+    expect(rr.breakdown.drawFiveFront).toBe(2); // 對花：前兩張黃帥命中
+    expect(rr.breakdown.drawFiveLast).toBe(0); // 尾椎：未命中
     expect(rr.heads).toBe(8); // 5（一色）＋1（自摸）＋2（抽五隻）
     const bySeat = Object.fromEntries(rr.payments.map((p) => [p.seat, p.delta]));
     expect(bySeat[1]).toBe(16); // 兩位付家各 8
@@ -192,7 +194,14 @@ describe('付款分配', () => {
     expect(eng.stage).not.toBe('DRAW_FIVE');
     const rr = eng.roundResult!;
     expect(rr.heads).toBe(0);
-    expect(rr.breakdown).toEqual({ color: 0, huKai: 0, selfDraw: 0, drawFive: 0 });
+    expect(rr.breakdown).toEqual({
+      color: 0,
+      colorCount: 4,
+      huKai: 0,
+      selfDraw: 0,
+      drawFiveFront: 0,
+      drawFiveLast: 0,
+    });
     expect(rr.drawFive).toBeNull();
     expect(rr.payments.every((p) => p.delta === 0)).toBe(true);
     expect(rr.winnerSeat).toBe(1); // 仍算胡牌（下一局當莊）
@@ -218,7 +227,8 @@ describe('付款分配', () => {
     expect(eng.apply('1', 'declareWin').ok).toBe(true);
     for (let i = 0; i < 5; i++) expect(eng.apply('1', 'drawFive').ok).toBe(true);
     const rr = eng.roundResult!;
-    expect(rr.breakdown.drawFive).toBe(2); // 最後一張命中 +2
+    expect(rr.breakdown.drawFiveFront).toBe(0);
+    expect(rr.breakdown.drawFiveLast).toBe(2); // 尾椎：最後一張命中 +2
     expect(rr.drawFive!.marks).toEqual([false, false, false, false, true]);
   });
 
@@ -229,8 +239,9 @@ describe('付款分配', () => {
     for (let i = 0; i < 5; i++) expect(eng.apply('1', 'drawFive').ok).toBe(true);
     const rr = eng.roundResult!;
     expect(rr.drawFive!.marks).toEqual([true, false, false, false, false]); // 黃仕命中
-    expect(rr.breakdown.drawFive).toBe(1);
-    expect(rr.heads).toBe(7); // 5（一色）＋1（自摸）＋1（抽五隻）
+    expect(rr.breakdown.drawFiveFront).toBe(1); // 對花
+    expect(rr.breakdown.drawFiveLast).toBe(0);
+    expect(rr.heads).toBe(7); // 5（一色）＋1（自摸）＋1（對花）
   });
 
   it('結算帶出胡牌者牌組（五對）與胡牌張', () => {

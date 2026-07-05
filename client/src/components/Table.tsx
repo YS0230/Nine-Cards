@@ -539,6 +539,9 @@ function DrawFivePanel({
   );
 }
 
+// 顏色種數（1~4）轉顯示用「x色」（§11）
+const colorCountLabel = (count: number) => `${['', '一', '二', '三', '四'][count] ?? count}色`;
+
 // 一局結算：胡牌方式、頭數明細、抽五隻揭示、各家累計分數
 function RoundResult({
   result,
@@ -604,10 +607,13 @@ function RoundResult({
             <div className="result-breakdown">
               {result.breakdown.color === 0
                 ? '四色 → 0 頭（不加頭、不抽五隻）'
-                : `顏色 ${result.breakdown.color}`}
-              {result.breakdown.selfDraw > 0 && ` ＋ 自摸 ${result.breakdown.selfDraw}`}
-              {result.breakdown.huKai > 0 && ` ＋ 胡開 ${result.breakdown.huKai}`}
-              {result.breakdown.drawFive > 0 && ` ＋ 抽五隻 ${result.breakdown.drawFive}`}
+                : `${colorCountLabel(result.breakdown.colorCount)} ${result.breakdown.color}頭`}
+              {result.breakdown.selfDraw > 0 && ` ＋ 自摸 ${result.breakdown.selfDraw}頭`}
+              {result.breakdown.huKai > 0 && ` ＋ 胡開 ${result.breakdown.huKai}頭`}
+              {result.breakdown.drawFiveFront > 0 &&
+                ` ＋ 對花 ${result.breakdown.drawFiveFront}頭`}
+              {result.breakdown.drawFiveLast > 0 &&
+                ` ＋ 尾椎 ${result.breakdown.drawFiveLast}頭`}
             </div>
             {result.drawFive && (
               <div className="result-drawfive">

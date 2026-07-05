@@ -77,6 +77,7 @@ interface PendingWin {
   seat: number;
   label: string;
   color: number; // §11 顏色頭數
+  colorCount: number; // 胡牌牌組用了幾種顏色（1~4，供結算畫面顯示「x色」）
   huKai: number; // §10.1 胡開頭數
   selfDraw: number; // 自摸加頭（自摸 1、否則 0）
   loserSeat: number | null; // 放槍者（抽五隻情境固定為 null）
@@ -692,11 +693,15 @@ export class GameEngine {
     const winningCard = ctx.winningCard ?? null;
     const loserSeat = ctx.loserSeat ?? null;
     const handBefore = ctx.handBefore ?? winner.hand;
-    const color = colorScore(this.ownedCards(winner)); // §11 顏色
+    const ownedCards = this.ownedCards(winner);
+    const color = colorScore(ownedCards); // §11 顏色
+    const colorCount = new Set(ownedCards.map((c) => c.color)).size; // 供結算畫面顯示「x色」
 
     // 四色（0 頭）：直接以 0 頭結算，不加胡開/自摸頭、也不抽五隻（§11）
     if (color === 0) {
-      this.finishWith(this.assembleResult(seat, label, 0, 0, 0, [], loserSeat, false, winningCard));
+      this.finishWith(
+        this.assembleResult(seat, label, 0, colorCount, 0, 0, [], loserSeat, false, winningCard),
+      );
       this.message = `${winner.name} ${label}胡牌！（四色 0 頭）`;
       return;
     }
@@ -709,12 +714,12 @@ export class GameEngine {
       // 進入手動抽五隻：由胡牌者一張一張抽，抽完才結算（不先設 FINISHED）
       this.stage = 'DRAW_FIVE';
       this.turnSeat = seat;
-      this.pendingWin = { seat, label, color, huKai, selfDraw, loserSeat, winningCard };
+      this.pendingWin = { seat, label, color, colorCount, huKai, selfDraw, loserSeat, winningCard };
       this.drawFive = {
         winnerSeat: seat,
         winningCard,
         // 加頭條件：抽中胡牌者牌組（五對）中任一種（同花同牌，§9.2）
-        kinds: new Set(this.ownedCards(winner).map(kindKey)),
+        kinds: new Set(ownedCards.map(kindKey)),
         entries: [],
       };
       this.message = `${winner.name} ${label}胡牌！請抽五隻`;
@@ -723,7 +728,9 @@ export class GameEngine {
     // 放槍／天胡／牌堆已空：無抽五隻，直接結算
     const showDrawFive = eligible; // 有資格但牌堆已空 → 仍揭示（空的）抽五隻
     this.finishWith(
-      this.assembleResult(seat, label, color, huKai, selfDraw, [], loserSeat, showDrawFive, winningCard),
+      this.assembleResult(
+        seat, label, color, colorCount, huKai, selfDraw, [], loserSeat, showDrawFive, winningCard,
+      ),
     );
     this.message = `${winner.name} ${label}胡牌！`;
   }
@@ -752,7 +759,8 @@ export class GameEngine {
     const entries = this.drawFive!.entries;
     this.finishWith(
       this.assembleResult(
-        pw.seat, pw.label, pw.color, pw.huKai, pw.selfDraw, entries, pw.loserSeat, true, pw.winningCard,
+        pw.seat, pw.label, pw.color, pw.colorCount, pw.huKai, pw.selfDraw, entries, pw.loserSeat, true,
+        pw.winningCard,
       ),
     );
     this.message = `${this.players[pw.seat].name} ${pw.label}胡牌！`;
@@ -774,6 +782,7 @@ export class GameEngine {
     seat: number,
     label: string,
     color: number,
+    colorCount: number,
     huKai: number,
     selfDraw: number,
     entries: { card: Card; qualifying: boolean; heads: number }[],
@@ -782,8 +791,10 @@ export class GameEngine {
     winningCard: Card | null,
   ): GameOverPayload {
     const winner = this.players[seat];
-    const dfHeads = entries.reduce((s, e) => s + e.heads, 0);
-    const heads = color + huKai + selfDraw + dfHeads;
+    // 抽五隻拆成「對花」（前四隻，每隻 1 頭）與「尾椎」（最後一隻，命中 2 頭）分開顯示（§9.2）
+    const drawFiveFront = entries.slice(0, 4).reduce((s, e) => s + e.heads, 0);
+    const drawFiveLast = entries[4]?.heads ?? 0;
+    const heads = color + huKai + selfDraw + drawFiveFront + drawFiveLast;
     // 胡牌者的完整牌組（五對）：依牌種排序讓成對的牌相鄰，供結算畫面展示
     const winnerHand = [...this.ownedCards(winner)].sort((a, b) =>
       kindKey(a) === kindKey(b) ? a.id.localeCompare(b.id) : kindKey(a).localeCompare(kindKey(b)),
@@ -805,7 +816,7 @@ export class GameEngine {
       reason: 'win',
       category: label,
       heads,
-      breakdown: { color, huKai, selfDraw, drawFive: dfHeads },
+      breakdown: { color, colorCount, huKai, selfDraw, drawFiveFront, drawFiveLast },
       drawFive: showDrawFive
         ? {
             cards: entries.map((e) => e.card),
@@ -828,7 +839,7 @@ export class GameEngine {
       reason: 'draw',
       category: '流局',
       heads: 0,
-      breakdown: { color: 0, huKai: 0, selfDraw: 0, drawFive: 0 },
+      breakdown: { color: 0, colorCount: 0, huKai: 0, selfDraw: 0, drawFiveFront: 0, drawFiveLast: 0 },
       drawFive: null,
       winnerHand: null,
       winningCard: null,

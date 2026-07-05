@@ -130,7 +130,15 @@ export interface GameOverPayload {
   category: string; // 胡牌方式標籤（自摸／放槍…）；流局為空
   heads: number; // 贏家每位付家收取的頭數
   // selfDraw＝自摸加一頭；四色（color 0）時整體 0 頭、其他加頭皆不計
-  breakdown: { color: number; huKai: number; selfDraw: number; drawFive: number };
+  // drawFiveFront＝對花（抽五隻前四隻，每隻 1 頭）；drawFiveLast＝尾椎（最後一隻，命中 2 頭）
+  breakdown: {
+    color: number;
+    colorCount: number; // 胡牌牌組用了幾種顏色（1~4），供顯示「x色」
+    huKai: number;
+    selfDraw: number;
+    drawFiveFront: number;
+    drawFiveLast: number;
+  };
   // 抽五隻揭示（不符資格為 null）：marks[i]＝該張是否符合加頭（§9.2）
   drawFive: { cards: Card[]; qualifying: number; marks: boolean[] } | null;
   winnerHand: Card[] | null; // 胡牌者的完整牌組（五對，含吃牌對子；依牌種排序）；流局為 null
