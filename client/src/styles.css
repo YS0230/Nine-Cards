@@ -418,6 +418,14 @@ body {
   border-color: var(--ok);
   background: rgba(47, 191, 113, 0.16);
 }
+/* 有人吃牌：顯示誰吃了哪張（待其打出定案） */
+.current-offer.eaten {
+  border-color: var(--accent);
+  background: rgba(224, 98, 26, 0.16);
+}
+.current-offer.eaten .co-label {
+  color: var(--accent);
+}
 .co-hint {
   font-size: 11px;
   opacity: 0.85;

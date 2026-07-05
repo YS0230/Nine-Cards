@@ -286,7 +286,7 @@ describe('自摸吃保護（不限時、下家不能先摸）', () => {
     expect(eng.protectedSelfEat).toBe(false);
   });
 
-  it('若他家能胡摸出的牌 → 不啟用保護（改為限時窗）', () => {
+  it('若他家能胡摸出的牌（摸牌者只能吃） → 不啟用保護（改為限時窗）', () => {
     const eng = drawSetup();
     eng.players[2].hand = [
       c('黃', '帥', 3),
@@ -298,5 +298,68 @@ describe('自摸吃保護（不限時、下家不能先摸）', () => {
     eng.apply('1', 'draw');
     expect(eng.protectedSelfEat).toBe(false);
     expect(eng.claimEndsAt).toBeLessThan(Number.MAX_SAFE_INTEGER);
+  });
+});
+
+// 架設「seat1 與 seat2 都聽 黃帥、seat1 摸到 黃帥」的情境（自摸最高優先）
+function bothTenpaiSetup() {
+  const eng = new GameEngine(
+    [
+      { id: '0', name: 'P0' },
+      { id: '1', name: 'P1' },
+      { id: '2', name: 'P2' },
+    ],
+    0,
+  );
+  eng.phase = 'PLAYING';
+  eng.stage = 'DRAW';
+  eng.turnSeat = 1;
+  eng.players[0].hand = [c('綠', '士'), c('綠', '象'), c('紅', '車')];
+  eng.players[1].hand = winningNine(); // 聽 黃帥
+  eng.players[2].hand = [
+    c('黃', '帥', 4),
+    c('紅', '仕', 3), c('紅', '仕', 4),
+    c('綠', '將', 5), c('綠', '將', 6),
+    c('白', '卒', 3), c('白', '卒', 4),
+    c('黃', '兵', 3), c('黃', '兵', 4),
+  ]; // 也聽 黃帥
+  const filler = Array.from({ length: 20 }, (_, i) => c('紅', '兵', i + 1));
+  eng.deck = [c('黃', '帥', 9), ...filler]; // 牌堆頂＝兩家都聽的黃帥
+  eng.discardPile = [];
+  return eng;
+}
+
+describe('自摸最高優先（多家聽同一張牌）', () => {
+  it('摸牌者能胡自己摸的牌 → 啟用保護，他家（也聽這張）不能先胡', () => {
+    const eng = bothTenpaiSetup();
+    const r = eng.apply('1', 'draw');
+    expect(r.ok).toBe(true);
+    expect(eng.stage).toBe('CLAIM');
+    expect(eng.protectedSelfEat).toBe(true);
+    expect(eng.claimEndsAt).toBe(Number.MAX_SAFE_INTEGER); // 不限時
+    expect(eng.legalActionsFor(1)).toContain('declareWin'); // 摸牌者可胡
+    expect(eng.legalActionsFor(2)).toEqual([]); // 他家要等摸牌者決定
+  });
+
+  it('他家搶先送出胡牌 → 被拒；摸牌者胡 → 自摸成立', () => {
+    const eng = bothTenpaiSetup();
+    eng.apply('1', 'draw');
+    const steal = eng.apply('2', 'declareWin');
+    expect(steal.ok).toBe(false);
+    const r = eng.apply('1', 'declareWin');
+    expect(r.ok).toBe(true);
+    expect(eng.winnerSeat).toBe(1); // 自摸最高優先
+  });
+
+  it('摸牌者不胡（pass） → 轉限時窗，他家才可胡', () => {
+    const eng = bothTenpaiSetup();
+    eng.apply('1', 'draw');
+    const r = eng.apply('1', 'pass');
+    expect(r.ok).toBe(true);
+    expect(eng.protectedSelfEat).toBe(false);
+    expect(eng.legalActionsFor(2)).toContain('declareWin');
+    const win = eng.apply('2', 'declareWin');
+    expect(win.ok).toBe(true);
+    expect(eng.winnerSeat).toBe(2);
   });
 });

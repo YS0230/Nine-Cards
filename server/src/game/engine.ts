@@ -8,6 +8,8 @@
 //  - 下一家要「兩秒後且無人宣告」才可以摸牌；即使超過兩秒，只要下一家還沒摸牌，仍可按吃。
 //  - 吃是「暫定」的：吃牌者尚未打出前，優先權更高的玩家仍可按吃搶走，低優先者讓出。
 //    依座位順序決定優先（胡 > 吃、下家優先）。
+//  - 自摸最高優先：多家聽同一張時，摸牌者能胡自己摸的牌 → 由摸牌者先決定（不限時），
+//    他家要等摸牌者胡／吃／不吃之後才有機會宣告。
 
 import {
   buildDeck,
@@ -120,7 +122,7 @@ export class GameEngine {
   tentative: Tentative | null = null; // 暫定對子資訊，供被搶時還原
   claimId = 0; // 每開一個新窗 +1，供伺服器排程對齊
   claimEndsAt = 0; // 下一家可摸牌的時間點（epoch ms）
-  protectedSelfEat = false; // 自摸吃保護：摸牌者可吃/胡自己的牌且無他家能胡 → 不限時、下家不能先摸
+  protectedSelfEat = false; // 自摸優先保護：摸牌者可胡自己的牌（最高優先），或可吃且無他家能胡 → 不限時、下家不能先摸
   tenpai: boolean[] = []; // 各座位是否聽牌（進入聽牌時宣告一次，§7）
 
   // 胡牌後手動抽五隻（§9.2）
@@ -297,10 +299,13 @@ export class GameEngine {
     this.stage = 'CLAIM';
     this.claimId++;
 
-    // 自摸吃保護：摸牌者能吃/胡自己摸的牌，且沒有其他家能胡 → 不限時、下家不能先摸
-    const drawerCanClaim = winners.includes(fromSeat) || eaters.includes(fromSeat);
+    // 自摸最高優先：多家聽同一張時，摸牌者能「胡」自己摸的牌 → 由摸牌者先決定（不限時），
+    // 他家（即使也聽這張）都要等摸牌者胡／吃／不吃後才有機會。
+    // 自摸吃保護：摸牌者只能「吃」自己摸的牌時，仍需沒有其他家能胡才保護（胡 > 吃）。
+    const drawerCanWin = winners.includes(fromSeat);
+    const drawerCanClaim = drawerCanWin || eaters.includes(fromSeat);
     const otherHu = winners.some((s) => s !== fromSeat);
-    if (kind === 'drawn' && drawerCanClaim && !otherHu) {
+    if (kind === 'drawn' && drawerCanClaim && (drawerCanWin || !otherHu)) {
       this.protectedSelfEat = true;
       this.claimEndsAt = Number.MAX_SAFE_INTEGER; // 不限時
       return;
@@ -773,6 +778,11 @@ export class GameEngine {
       this.stage === 'CLAIM' && this.pending
         ? { card: this.pending.card, fromSeat: this.pending.fromSeat }
         : null;
+    // 有人暫定吃牌：公開「誰吃了哪張」讓所有玩家看到（待吃牌者打出才定案）
+    const eating =
+      this.stage === 'EATING' && this.eatHolder !== null && this.pending
+        ? { seat: this.eatHolder, card: this.pending.card }
+        : null;
     // 胡牌後手動抽五隻（§9.2）：把已抽出的牌（含加頭標記）公開給前端顯示
     const drawFive: DrawFiveView | null =
       this.stage === 'DRAW_FIVE' && this.drawFive
@@ -808,6 +818,7 @@ export class GameEngine {
       currentTurnSeat: this.turnSeat,
       lastDrawn,
       pendingClaim,
+      eating,
       dealerDraw,
       // 自摸保護時不限時 → 不送倒數（前端不顯示倒數條）
       claimEndsAt: this.stage === 'CLAIM' && !this.protectedSelfEat ? this.claimEndsAt : null,

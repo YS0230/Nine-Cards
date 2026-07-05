@@ -26,24 +26,33 @@ export function Table({ api }: { api: GameApi }) {
   const canPass = g.legalActions.includes('pass'); // 自摸保護：可「不吃」打出摸到的牌
   const myTurn = g.currentTurnSeat === mySeat;
   const turnName = g.players.find((p) => p.seat === g.currentTurnSeat)?.name ?? '';
+  const nameOf = (seat: number) =>
+    seat === mySeat ? '你' : (g.players.find((p) => p.seat === seat)?.name ?? `座位${seat}`);
 
   // ── 摸牌/出牌時：先在主畫面「翻牌」跳一下，再落入桌面 ──
   const [reveal, setReveal] = useState<{ card: CardT; label: string } | null>(null);
   const prevDrawnId = useRef<string | null>(null);
+  const prevEatKey = useRef<string | null>(null);
   const prevDiscardLen = useRef(g.discardPile.length);
   const timer = useRef<number | undefined>(undefined);
 
   useEffect(() => {
     let card: CardT | null = null;
     let label = '翻牌';
+    // 吃牌（含被更高優先者搶吃）以「座位+牌」為鍵，換人吃同一張也會再跳一次
+    const eatKey = g.eating ? `${g.eating.seat}:${g.eating.card.id}` : null;
     if (g.lastDrawn && g.lastDrawn.card.id !== prevDrawnId.current) {
       card = g.lastDrawn.card;
       label = `${g.players.find((p) => p.seat === g.lastDrawn!.seat)?.name ?? ''} 摸到`;
+    } else if (g.eating && eatKey !== prevEatKey.current) {
+      card = g.eating.card;
+      label = `${nameOf(g.eating.seat)} 吃了`;
     } else if (g.discardPile.length > prevDiscardLen.current) {
       card = g.discardPile[g.discardPile.length - 1];
       label = '打出';
     }
     prevDrawnId.current = g.lastDrawn?.card.id ?? null;
+    prevEatKey.current = eatKey;
     prevDiscardLen.current = g.discardPile.length;
     if (card) {
       setReveal({ card, label });
@@ -123,6 +132,17 @@ export function Table({ api }: { api: GameApi }) {
               />
               {canPass && <div className="co-hint">不吃 → 點這張打出</div>}
               {g.claimEndsAt && <CountdownBar endsAt={g.claimEndsAt} />}
+            </div>
+          )}
+
+          {/* 有人吃牌：公開顯示誰吃了哪張（待其打出定案；期間高優先者仍可搶） */}
+          {g.eating && (
+            <div className="current-offer eaten">
+              <div className="co-label">{nameOf(g.eating.seat)} 吃了這張</div>
+              <Card card={g.eating.card} />
+              <div className="co-hint">
+                {g.eating.seat === mySeat ? '請打出一張牌' : `等待 ${nameOf(g.eating.seat)} 出牌…`}
+              </div>
             </div>
           )}
 
