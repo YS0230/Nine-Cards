@@ -102,8 +102,14 @@ export interface ApplyResult {
 }
 
 const DRAW_GAME_FLOOR = 9; // 牌堆剩 9 張仍無人胡則流局（§12）
-// 下一家可摸牌前的等待時間（可用環境變數 CLAIM_WINDOW_MS 覆寫，測試用）
+// 下一家可摸牌前的等待時間「預設值」（可用環境變數 CLAIM_WINDOW_MS 覆寫，測試用）；
+// 實際每房可於建房時選擇秒數（EngineOptions.claimWindowMs）
 export const CLAIM_WINDOW_MS = Number(process.env.CLAIM_WINDOW_MS ?? 5000);
+
+export interface EngineOptions {
+  hints?: boolean; // 新手提示（預設開）
+  claimWindowMs?: number; // 吃牌窗等待毫秒（預設 CLAIM_WINDOW_MS）
+}
 // 決定莊家後、面板停留讓玩家查看抽到的牌的時間（可用 DEALER_REVEAL_MS 覆寫）
 export const DEALER_REVEAL_MS = Number(process.env.DEALER_REVEAL_MS ?? 3000);
 
@@ -146,6 +152,7 @@ export class GameEngine {
   // 新手提示（建房選項）：開＝沒人能吃/胡就不開吃牌窗、legalActions 供前端鎖定按鈕；
   // 關＝每張牌都開吃牌窗，玩家自行判斷按吃/胡，按下後才由伺服器驗證
   readonly hints: boolean;
+  readonly claimWindowMs: number; // 吃牌窗等待時間（建房時選擇）
 
   // dealerSeat=null：開局由玩家自己抽牌決定莊家（§4.1，僅第一局）；
   // 傳入座位號：直接指定莊家並發牌（續局／測試用）。
@@ -153,11 +160,12 @@ export class GameEngine {
     seats: SeatInit[],
     dealerSeat: number | null,
     rng: () => number = Math.random,
-    hints = true,
+    opts: EngineOptions = {},
   ) {
     this.n = seats.length;
     this.rng = rng;
-    this.hints = hints;
+    this.hints = opts.hints ?? true;
+    this.claimWindowMs = opts.claimWindowMs ?? CLAIM_WINDOW_MS;
     this.tenpai = new Array(this.n).fill(false);
     this.xianggong = new Array(this.n).fill(false);
     this.players = seats.map((s, seat) => ({
@@ -335,7 +343,7 @@ export class GameEngine {
       this.claimEndsAt = Number.MAX_SAFE_INTEGER; // 不限時
       return;
     }
-    this.claimEndsAt = Date.now() + CLAIM_WINDOW_MS;
+    this.claimEndsAt = Date.now() + this.claimWindowMs;
   }
 
   private formTentativeEat(seat: number) {
@@ -436,7 +444,8 @@ export class GameEngine {
     }
     if (
       this.pending &&
-      seat === this.nextSeat(this.pending.fromSeat) &&
+      // 下一位「可行動」者才可摸牌關窗：跳過相公，否則相公卡在下家位置時無人能摸牌、遊戲卡死
+      seat === this.nextActiveSeat(this.pending.fromSeat) &&
       Date.now() >= this.claimEndsAt
     ) {
       acts.push('draw');
@@ -626,10 +635,10 @@ export class GameEngine {
     this.protectedSelfEat = false;
     this.claimOrder = this.claimOrder.filter((s) => s !== p.seat);
     if (this.claimOrder.length > 0) {
-      // 還有他家能吃這張摸出的牌 → 轉為限時窗，下家兩秒後可摸牌
+      // 還有他家能吃這張摸出的牌 → 轉為限時窗，等待時間到後下家可摸牌
       this.stage = 'CLAIM';
       this.claimId++;
-      this.claimEndsAt = Date.now() + CLAIM_WINDOW_MS;
+      this.claimEndsAt = Date.now() + this.claimWindowMs;
       return { ok: true };
     }
     this.clearClaim();
@@ -888,6 +897,7 @@ export class GameEngine {
       dealerDraw,
       // 自摸保護時不限時 → 不送倒數（前端不顯示倒數條）
       claimEndsAt: this.stage === 'CLAIM' && !this.protectedSelfEat ? this.claimEndsAt : null,
+      claimWindowMs: this.claimWindowMs,
       drawFive,
       continueReady: [], // 由 gameServer/index 依房間 readyIds 補上
       paused: false, // 由 index 依房間 paused 補上（引擎不知房間層斷線狀態）

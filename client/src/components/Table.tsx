@@ -182,7 +182,7 @@ export function Table({ api }: { api: GameApi }) {
                 onClick={canPass ? () => api.act('pass') : undefined}
               />
               {canPass && <div className="co-hint">不吃 → 點這張打出</div>}
-              {g.claimEndsAt && <CountdownBar endsAt={g.claimEndsAt} />}
+              {g.claimEndsAt && <CountdownBar endsAt={g.claimEndsAt} total={g.claimWindowMs} />}
             </div>
           )}
 
@@ -642,7 +642,7 @@ function RoundResult({
 }
 
 // 吃牌時間窗倒數條：從剩餘時間縮到 0，讓玩家知道要在時間內決定
-function CountdownBar({ endsAt }: { endsAt: number }) {
+function CountdownBar({ endsAt, total }: { endsAt: number; total: number }) {
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
     let raf = 0;
@@ -653,7 +653,6 @@ function CountdownBar({ endsAt }: { endsAt: number }) {
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
   }, [endsAt]);
-  const total = 5000;
   const remain = Math.max(0, endsAt - now);
   const pct = Math.min(100, (remain / total) * 100);
   return (

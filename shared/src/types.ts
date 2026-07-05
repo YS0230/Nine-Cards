@@ -19,6 +19,7 @@ export interface RoomView {
   phase: RoomPhase;
   isPublic: boolean;
   hints: boolean; // 新手提示：伺服器預先檢核可吃/可胡並鎖定按鈕（建房時選擇）
+  claimSeconds: number; // 吃牌窗等待秒數（建房時選擇）
   seats: RoomSeat[];
   hostId: string | null;
   maxPlayers: number;
@@ -95,6 +96,7 @@ export interface PersonalGameState {
     decidedSeat: number | null;
   } | null;
   claimEndsAt: number | null; // 吃牌時間窗結束的 epoch ms（null = 非時間窗）
+  claimWindowMs: number; // 吃牌窗總長（毫秒；建房時選擇，前端倒數條分母用）
   drawFive: DrawFiveView | null; // 胡牌後手動抽五隻進行中（§9.2）；非此階段為 null
   continueReady: number[]; // 結算後已按「繼續」的座位（§13：全員按繼續才開下一局）
   paused: boolean; // 有玩家斷線 → 全體暫停，等待重連（由 gameServer 填入）

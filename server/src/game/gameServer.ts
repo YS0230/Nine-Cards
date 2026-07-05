@@ -1,6 +1,6 @@
 // 房間、配對與玩家身分管理（不直接碰 socket，交由 index.ts 廣播）
 import { randomUUID } from 'node:crypto';
-import { GameEngine, type SeatInit } from './engine.js';
+import { CLAIM_WINDOW_MS, GameEngine, type SeatInit } from './engine.js';
 import type { ActionType, RoomView, RoomPhase, LobbyRoom, GameEndedPayload } from '@nine-cards/shared';
 
 const MAX_PLAYERS = 4;
@@ -20,6 +20,7 @@ export interface Room {
   code: string;
   isPublic: boolean;
   hints: boolean; // 新手提示（建房時選擇）：開＝伺服器預檢吃/胡、前端鎖定按鈕
+  claimMs: number; // 吃牌窗等待毫秒（建房時選擇秒數）
   phase: RoomPhase;
   players: Player[]; // 依加入順序，開局後 seat 對齊索引
   hostId: string | null;
@@ -91,15 +92,26 @@ export class GameServer {
     };
   }
 
-  createRoom(name: string, socketId: string, isPublic = false, hints = true): JoinOutcome {
+  createRoom(
+    name: string,
+    socketId: string,
+    isPublic = false,
+    hints = true,
+    claimSeconds?: number,
+  ): JoinOutcome {
     const id = randomUUID();
     const code = makeCode(new Set(this.codeIndex.keys()));
     const host = this.newPlayer(name, socketId, 0);
+    // 吃牌窗秒數（建房選項）：限制 1–30 秒，非法值回落預設
+    const secs = Number(claimSeconds);
+    const claimMs =
+      Number.isFinite(secs) && secs >= 1 && secs <= 30 ? Math.round(secs * 1000) : CLAIM_WINDOW_MS;
     const room: Room = {
       id,
       code,
       isPublic,
       hints,
+      claimMs,
       phase: 'WAITING',
       players: [host],
       hostId: host.id,
@@ -198,7 +210,10 @@ export class GameServer {
     // 本場累計頭數歸零（每位玩家）
     room.scores = new Map(room.players.map((p) => [p.id, 0]));
     // §4.1：第一局由玩家自己抽牌決定莊家（引擎進入 DEAL_DRAW，莊家決定後才發牌）
-    room.engine = new GameEngine(seats, null, undefined, room.hints);
+    room.engine = new GameEngine(seats, null, undefined, {
+      hints: room.hints,
+      claimWindowMs: room.claimMs,
+    });
     room.lastDealerSeat = 0; // 佔位，莊家決定後於 action() 同步為實際莊家
     room.settled = false;
     room.phase = 'PLAYING';
@@ -264,7 +279,10 @@ export class GameServer {
       prev && prev.nextDealerSeat != null ? prev.nextDealerSeat : room.lastDealerSeat;
     room.lastDealerSeat = dealerSeat;
     const seats: SeatInit[] = room.players.map((p) => ({ id: p.id, name: p.name }));
-    room.engine = new GameEngine(seats, dealerSeat, undefined, room.hints);
+    room.engine = new GameEngine(seats, dealerSeat, undefined, {
+      hints: room.hints,
+      claimWindowMs: room.claimMs,
+    });
     room.settled = false;
     this.syncScores(room);
     if (room.engine.phase === 'FINISHED') {
@@ -447,6 +465,7 @@ export class GameServer {
       phase: room.phase,
       isPublic: room.isPublic,
       hints: room.hints,
+      claimSeconds: Math.round(room.claimMs / 1000),
       seats,
       hostId: room.hostId,
       maxPlayers: MAX_PLAYERS,

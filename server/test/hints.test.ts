@@ -15,8 +15,8 @@ const seats3 = [
 ];
 
 // 佈置：seat0（莊家）打出 黃帥1，其餘兩家都不能吃/胡
-function setupNoClaimDiscard(hints: boolean) {
-  const eng = new GameEngine(seats3, 0, () => 0.5, hints);
+function setupNoClaimDiscard(hints: boolean, claimWindowMs?: number) {
+  const eng = new GameEngine(seats3, 0, () => 0.5, { hints, claimWindowMs });
   eng.phase = 'PLAYING';
   eng.stage = 'DISCARD';
   eng.turnSeat = 0;
@@ -76,5 +76,32 @@ describe('新手提示（建房選項）', () => {
     const eng = setupNoClaimDiscard(false);
     expect(eng.viewFor('1').hints).toBe(false);
     expect(setupNoClaimDiscard(true).viewFor('1').hints).toBe(true);
+  });
+
+  it('提示關＋下家相公：摸牌權跳過相公給再下一家，遊戲不卡死', () => {
+    const eng = setupNoClaimDiscard(false);
+    eng.xianggong[1] = true; // 下家（seat1）已相公
+    expect(eng.apply('0', 'discard', '黃_帥_1').ok).toBe(true);
+    expect(eng.stage).toBe('CLAIM');
+    eng.claimEndsAt = 0; // 時間到
+    // 相公本人不能有任何動作；摸牌權跳過他、落在 seat2
+    expect(eng.legalActionsFor(1)).toEqual([]);
+    expect(eng.legalActionsFor(2)).toContain('draw');
+    expect(eng.apply('2', 'draw').ok).toBe(true);
+    expect(eng.discardPile.map((x) => x.id)).toContain('黃_帥_1');
+    expect(eng.turnSeat).toBe(2); // 換到 seat2（跳過相公）
+  });
+});
+
+describe('吃牌窗等待秒數（建房選項）', () => {
+  it('自訂 claimWindowMs 反映在吃牌窗截止時間與 viewFor', () => {
+    const eng = setupNoClaimDiscard(false, 2000);
+    expect(eng.claimWindowMs).toBe(2000);
+    expect(eng.viewFor('1').claimWindowMs).toBe(2000);
+    const before = Date.now();
+    expect(eng.apply('0', 'discard', '黃_帥_1').ok).toBe(true);
+    const wait = eng.claimEndsAt - before;
+    expect(wait).toBeGreaterThan(1500);
+    expect(wait).toBeLessThanOrEqual(2100);
   });
 });

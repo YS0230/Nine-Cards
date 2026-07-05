@@ -1018,3 +1018,22 @@ body {
   font-size: 12px;
   opacity: 0.7;
 }
+
+/* ── 建房選項：吃牌等待秒數 ─────────────────────── */
+.field-select {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  max-width: 320px;
+  font-size: 14px;
+}
+.field-select select {
+  font-size: 16px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(0, 0, 0, 0.25);
+  color: var(--paper);
+}

@@ -96,7 +96,13 @@ io.on('connection', (socket) => {
   socket.on(EVT.UNWATCH_LOBBY, () => socket.leave('lobby'));
 
   socket.on(EVT.CREATE_ROOM, (req: CreateRoomReq, ack?: (r: JoinResult) => void) => {
-    const r = game.createRoom(req?.name ?? '玩家', socket.id, req?.isPublic ?? false, req?.hints ?? true);
+    const r = game.createRoom(
+      req?.name ?? '玩家',
+      socket.id,
+      req?.isPublic ?? false,
+      req?.hints ?? true,
+      req?.claimSeconds,
+    );
     if (!r.ok || !r.room || !r.player) return respond(ack, { ok: false, error: r.error });
     socket.leave('lobby');
     respond(ack, joinResult(r.room, r.player));

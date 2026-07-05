@@ -17,7 +17,7 @@ export function WaitingRoom({ api }: { api: GameApi }) {
       <h2>房間 {room.code}</h2>
       <p className="subtitle">
         {room.isPublic ? '公開房' : '私人房'}・新手提示{room.hints ? '開' : '關'}
-        ・分享房號給朋友加入
+        ・吃牌等待 {room.claimSeconds} 秒・分享房號給朋友加入
       </p>
 
       <button

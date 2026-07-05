@@ -42,6 +42,7 @@ export interface CreateRoomReq {
   name: string;
   isPublic?: boolean;
   hints?: boolean; // 新手提示（預設開）：伺服器預檢吃/胡並鎖定按鈕
+  claimSeconds?: number; // 吃牌窗等待秒數（1–30；未給或非法值用伺服器預設）
 }
 export interface JoinRoomReq {
   code: string;

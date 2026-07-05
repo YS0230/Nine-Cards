@@ -10,6 +10,7 @@ export function Lobby({ api }: { api: GameApi }) {
   const [code, setCode] = useState(urlCode);
   const [mode, setMode] = useState<Mode>(urlCode ? 'join' : 'menu');
   const [hints, setHints] = useState(true); // 建房選項：新手提示（可吃/胡才啟用按鈕）
+  const [claimSeconds, setClaimSeconds] = useState(5); // 建房選項：吃牌窗等待秒數
 
   const nameOk = name.trim().length > 0;
 
@@ -53,10 +54,24 @@ export function Lobby({ api }: { api: GameApi }) {
                 <small>開：可吃/胡時才能按按鈕；關：按鈕不鎖定，由伺服器判定</small>
               </span>
             </label>
+            {/* 建房選項：吃牌等待秒數（下家需等此秒數且無人宣告才可摸牌） */}
+            <label className="field-select">
+              <span>吃牌等待秒數</span>
+              <select
+                value={claimSeconds}
+                onChange={(e) => setClaimSeconds(Number(e.target.value))}
+              >
+                {[2, 3, 5, 8, 10, 15].map((s) => (
+                  <option key={s} value={s}>
+                    {s} 秒
+                  </option>
+                ))}
+              </select>
+            </label>
             <button
               className="btn primary"
               disabled={!nameOk}
-              onClick={() => api.createRoom(name, true, hints)}
+              onClick={() => api.createRoom(name, true, hints, claimSeconds)}
             >
               建立公開房
             </button>
@@ -64,7 +79,7 @@ export function Lobby({ api }: { api: GameApi }) {
               <button
                 className="btn"
                 disabled={!nameOk}
-                onClick={() => api.createRoom(name, false, hints)}
+                onClick={() => api.createRoom(name, false, hints, claimSeconds)}
               >
                 建立私人房
               </button>
