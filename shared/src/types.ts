@@ -1,8 +1,10 @@
 import type { Card } from './cards.js';
 
-export type RoomPhase = 'WAITING' | 'PLAYING' | 'FINISHED';
+// ENDED＝整場遊戲結束（有人離開），顯示最終計分版；FINISHED＝單局結算（可續局）
+export type RoomPhase = 'WAITING' | 'PLAYING' | 'FINISHED' | 'ENDED';
 
-export type ActionType = 'draw' | 'discard' | 'eat' | 'pass' | 'declareWin';
+// drawFive＝胡牌後由胡牌者手動一張一張抽五隻（§9.2）
+export type ActionType = 'draw' | 'discard' | 'eat' | 'pass' | 'declareWin' | 'drawFive';
 
 // ── 大廳/房間（未開局）視圖 ──────────────────────────────
 export interface RoomSeat {
@@ -52,6 +54,23 @@ export interface SelfView {
   deadIds: string[]; // 我的死牌（在 hand 中的 id，FIFO 順序）；出牌時須先出（§7.3）
 }
 
+// ── 胡牌後手動抽五隻（§9.2）：由胡牌者一張一張抽，符合條件者標記加頭 ──
+export interface DrawFiveEntry {
+  card: Card;
+  qualifying: boolean; // 與胡的那張同種（同花同牌）→ 加頭
+  heads: number; // 該張加的頭數（不符 0；前四張符合 1；第五張符合 2）
+}
+
+export interface DrawFiveView {
+  winnerSeat: number;
+  winnerName: string;
+  winningCard: Card; // 胡的那張（判定加頭的依據）
+  entries: DrawFiveEntry[]; // 已抽出的牌（依序）
+  drawn: number; // 已抽張數
+  total: number; // 目標張數（5，或受牌堆剩餘限制）
+  canDraw: boolean; // 是否輪到你（胡牌者）抽下一張
+}
+
 /** 伺服器針對每位玩家個別產生的對局狀態（隱藏他人手牌）。 */
 export interface PersonalGameState {
   roomId: string;
@@ -72,6 +91,10 @@ export interface PersonalGameState {
     decidedSeat: number | null;
   } | null;
   claimEndsAt: number | null; // 吃牌時間窗結束的 epoch ms（null = 非時間窗）
+  drawFive: DrawFiveView | null; // 胡牌後手動抽五隻進行中（§9.2）；非此階段為 null
+  continueReady: number[]; // 結算後已按「繼續」的座位（§13：全員按繼續才開下一局）
+  paused: boolean; // 有玩家斷線 → 全體暫停，等待重連（由 gameServer 填入）
+  disconnectedNames: string[]; // 目前斷線中的玩家名稱（暫停遮罩顯示用）
   legalActions: ActionType[]; // 伺服器告訴你此刻可做的動作
   winnerSeat: number | null;
   message: string | null;
@@ -95,8 +118,16 @@ export interface GameOverPayload {
   category: string; // 胡牌方式標籤（自摸／放槍…）；流局為空
   heads: number; // 贏家每位付家收取的頭數
   breakdown: { color: number; huKai: number; drawFive: number };
-  drawFive: { cards: Card[]; qualifying: number } | null; // 抽五隻揭示（不符資格為 null）
+  // 抽五隻揭示（不符資格為 null）：marks[i]＝該張是否符合加頭（§9.2）
+  drawFive: { cards: Card[]; qualifying: number; marks: boolean[] } | null;
   payments: PaymentEntry[]; // 本局各座位頭數變化
   scores: ScoreEntry[]; // 跨局累計（由 gameServer 填入）
   nextDealerSeat: number | null; // 下一局莊家（由 gameServer 填入）
+}
+
+/** 整場遊戲結束（有人離開牌局）：顯示最終計分版。 */
+export interface GameEndedPayload {
+  reason: 'playerLeft'; // 目前僅「有玩家離開」會結束整場
+  leaverName: string; // 觸發結束的離開者名稱
+  scores: { seat: number; name: string; total: number }[]; // 各家最終累計頭數
 }

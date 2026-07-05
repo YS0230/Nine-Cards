@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { GameApi } from '../useGame.js';
 import { Card } from './Card.js';
-import type { PublicPlayer, Card as CardT, GameOverPayload } from '@nine-cards/shared';
+import type { PublicPlayer, Card as CardT, GameOverPayload, DrawFiveView } from '@nine-cards/shared';
 
 export function Table({ api }: { api: GameApi }) {
   const g = api.game!;
@@ -60,6 +60,11 @@ export function Table({ api }: { api: GameApi }) {
     }
   };
 
+  // 離開遊戲（§13）：確認後退出本場，回到大廳
+  const onLeaveClick = () => {
+    if (window.confirm('確定要離開這場遊戲嗎？')) api.leave();
+  };
+
   const prompt = canWin
     ? '你可以胡牌！'
     : canPass
@@ -87,6 +92,9 @@ export function Table({ api }: { api: GameApi }) {
         <span className={`chip turn ${myTurn ? 'me' : ''}`}>
           {myTurn ? '輪到你' : `輪到 ${turnName}`}
         </span>
+        <button className="chip leave-chip" onClick={onLeaveClick}>
+          離開
+        </button>
       </header>
 
       <section className="opponents">
@@ -215,13 +223,87 @@ export function Table({ api }: { api: GameApi }) {
         />
       )}
 
-      {api.gameOver && (
+      {/* 胡牌後手動抽五隻（§9.2）：由胡牌者一張一張抽，符合條件者標記加頭 */}
+      {g.drawFive && (
+        <DrawFivePanel drawFive={g.drawFive} mySeat={mySeat} onDraw={() => api.act('drawFive')} />
+      )}
+
+      {api.gameOver && !api.gameEnded && (
         <RoundResult
           result={api.gameOver}
           players={g.players}
+          mySeat={mySeat}
+          continueReady={g.continueReady}
+          onContinue={api.readyContinue}
           onLeave={api.leave}
         />
       )}
+
+      {/* 斷線暫停遮罩：其他在線玩家等待斷線者重連（斷線者本人看到的是「連線中…」） */}
+      {g.paused && !api.gameEnded && (
+        <PausedOverlay names={g.disconnectedNames} onEnd={onLeaveClick} />
+      )}
+
+      {/* 整場結束：有人離開牌局 → 最終計分版 */}
+      {api.gameEnded && <FinalScoreboard result={api.gameEnded} onHome={api.leave} />}
+    </div>
+  );
+}
+
+// 斷線暫停遮罩（§2）：顯示等待重連的玩家；並提供「結束本場」逃生門（避免無限等待）
+function PausedOverlay({ names, onEnd }: { names: string[]; onEnd: () => void }) {
+  return (
+    <div className="overlay paused-overlay">
+      <div className="result paused-card">
+        <div className="paused-spinner" aria-hidden="true" />
+        <h2>遊戲暫停</h2>
+        <p className="paused-msg">
+          等待
+          {names.length > 0 ? <b>「{names.join('、')}」</b> : '玩家'}
+          重新連線…
+        </p>
+        <p className="hint">連線恢復後將自動繼續牌局。</p>
+        <button className="btn ghost" onClick={onEnd}>
+          結束本場遊戲
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// 整場結束計分版（§1）：有人離開 → 顯示各家最終累計頭數
+function FinalScoreboard({
+  result,
+  onHome,
+}: {
+  result: import('@nine-cards/shared').GameEndedPayload;
+  onHome: () => void;
+}) {
+  const top = result.scores.length > 0 ? result.scores[0].total : 0;
+  return (
+    <div className="overlay ended-overlay">
+      <div className="result">
+        <h2>牌局結束</h2>
+        <div className="result-cat">{result.leaverName} 離開了遊戲</div>
+        <table className="score-table">
+          <tbody>
+            {result.scores.map((s, i) => (
+              <tr key={s.seat} className={i === 0 && top > 0 ? 'winner-row' : ''}>
+                <td>
+                  {i === 0 && top > 0 && '🏆 '}
+                  {s.name}
+                </td>
+                <td className="score-total">{s.total} 頭</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div className="result-actions">
+          <button className="btn primary" onClick={onHome}>
+            返回大廳
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -294,14 +376,72 @@ function DealerDrawPanel({
   );
 }
 
+// 胡牌後手動抽五隻（§9.2）：胡牌者按「抽牌」一張一張抽，符合加頭者高亮標記
+function DrawFivePanel({
+  drawFive,
+  mySeat,
+  onDraw,
+}: {
+  drawFive: DrawFiveView;
+  mySeat: number;
+  onDraw: () => void;
+}) {
+  const isWinner = drawFive.winnerSeat === mySeat;
+  const whoName = isWinner ? '你' : drawFive.winnerName;
+  const qualified = drawFive.entries.filter((e) => e.qualifying).length;
+  return (
+    <div className="overlay">
+      <div className="result draw-five-panel">
+        <h2>抽五隻</h2>
+        <div className="df-hint">
+          {whoName} 胡「{drawFive.winningCard.color}
+          {drawFive.winningCard.rank}」，抽五張；抽中同種即加頭
+        </div>
+        <div className="df-progress">
+          已抽 {drawFive.drawn} / {drawFive.total}　中 {qualified} 張
+        </div>
+        <div className="df-cards">
+          {drawFive.entries.map((e, i) => (
+            <div className={`df-slot ${e.qualifying ? 'hit' : ''}`} key={e.card.id + i}>
+              <Card card={e.card} small />
+              {e.qualifying && <span className="df-badge">＋{e.heads}</span>}
+            </div>
+          ))}
+          {/* 尚未抽出的位置以佔位框顯示 */}
+          {Array.from({ length: Math.max(0, drawFive.total - drawFive.drawn) }).map((_, i) => (
+            <div className="df-slot empty" key={`e${i}`}>
+              <div className="df-placeholder">?</div>
+            </div>
+          ))}
+        </div>
+        {drawFive.canDraw ? (
+          <button className="btn primary" onClick={onDraw}>
+            抽一張
+          </button>
+        ) : (
+          <div className="df-wait">
+            {isWinner ? '抽牌完成，計分中…' : `等待 ${drawFive.winnerName} 抽牌…`}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // 一局結算：胡牌方式、頭數明細、抽五隻揭示、各家累計分數
 function RoundResult({
   result,
   players,
+  mySeat,
+  continueReady,
+  onContinue,
   onLeave,
 }: {
   result: GameOverPayload;
   players: PublicPlayer[];
+  mySeat: number;
+  continueReady: number[];
+  onContinue: () => void;
   onLeave: () => void;
 }) {
   const nameOf = (seat: number) => players.find((p) => p.seat === seat)?.name ?? `座位${seat}`;
@@ -332,7 +472,10 @@ function RoundResult({
                 <div className="rd-label">抽五隻（中 {result.drawFive.qualifying} 張）</div>
                 <div className="rd-cards">
                   {result.drawFive.cards.map((card, i) => (
-                    <Card key={card.id + i} card={card} small />
+                    <div className={`df-slot ${result.drawFive!.marks[i] ? 'hit' : ''}`} key={card.id + i}>
+                      <Card card={card} small />
+                      {result.drawFive!.marks[i] && <span className="df-badge">加頭</span>}
+                    </div>
                   ))}
                 </div>
               </div>
@@ -358,14 +501,27 @@ function RoundResult({
         </table>
 
         {result.nextDealerSeat != null && (
-          <div className="result-next">
-            下一局莊家：{nameOf(result.nextDealerSeat)}（即將自動開始…）
-          </div>
+          <div className="result-next">下一局莊家：{nameOf(result.nextDealerSeat)}</div>
         )}
 
-        <button className="btn primary" onClick={onLeave}>
-          離台
-        </button>
+        {/* §13：全員按「繼續」才開下一局，否則停留在結算畫面 */}
+        <div className="result-ready">
+          已準備 {continueReady.length} / {players.filter((p) => p.connected).length} 人
+        </div>
+        <div className="result-actions">
+          {continueReady.includes(mySeat) ? (
+            <button className="btn primary" disabled>
+              已準備，等待其他玩家…
+            </button>
+          ) : (
+            <button className="btn primary" onClick={onContinue}>
+              繼續下一局
+            </button>
+          )}
+          <button className="btn" onClick={onLeave}>
+            離開
+          </button>
+        </div>
       </div>
     </div>
   );

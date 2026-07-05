@@ -1,12 +1,10 @@
 // 房間、配對與玩家身分管理（不直接碰 socket，交由 index.ts 廣播）
 import { randomUUID } from 'node:crypto';
 import { GameEngine, type SeatInit } from './engine.js';
-import type { ActionType, RoomView, RoomPhase, LobbyRoom } from '@nine-cards/shared';
+import type { ActionType, RoomView, RoomPhase, LobbyRoom, GameEndedPayload } from '@nine-cards/shared';
 
 const MAX_PLAYERS = 4;
 const MIN_PLAYERS = 2;
-// 一局結束到自動開下一局的間隔（讓玩家看結算；可用 NEXT_HAND_MS 覆寫）
-const NEXT_HAND_MS = Number(process.env.NEXT_HAND_MS ?? 6000);
 
 export interface Player {
   id: string;
@@ -28,10 +26,13 @@ export interface Room {
   lastDealerSeat: number;
   scores: Map<string, number>; // playerId → 本場累計頭數（跨局保留）
   settled: boolean; // 本局結算是否已套用（避免重複計分）
+  readyIds: Set<string>; // 結算後已按「繼續」的 playerId（全員按下才開下一局，§13）
   claimTimer?: ReturnType<typeof setTimeout>;
   scheduledClaimId?: number;
-  nextHandTimer?: ReturnType<typeof setTimeout>; // 續局計時器（§4.2/§12）
   dealerRevealTimer?: ReturnType<typeof setTimeout>; // 決定莊家展示計時器（§4.1）
+  paused: boolean; // 有玩家斷線 → 全體暫停等待重連（凍結計時器、擋動作）
+  pausedAt?: number; // 進入暫停的時間點，重連時據以把凍結的計時器整體後移
+  endResult?: GameEndedPayload; // 整場結束（有人離開）的最終計分版（ENDED 階段）
 }
 
 export interface ActionResult {
@@ -104,6 +105,8 @@ export class GameServer {
       lastDealerSeat: 0,
       scores: new Map(),
       settled: false,
+      readyIds: new Set(),
+      paused: false,
     };
     this.rooms.set(id, room);
     this.codeIndex.set(code, id);
@@ -147,7 +150,37 @@ export class GameServer {
     player.socketId = socketId;
     player.connected = true;
     room.engine?.setConnected(player.id, true);
+    // 全員回到線上 → 解除暫停，並把暫停期間凍結的計時器整體後移，繼續牌局
+    if (room.paused && room.players.every((p) => p.connected)) this.resumeRoom(room);
     return { ok: true, room, player };
+  }
+
+  // 所有玩家皆回到線上：解除暫停。把吃牌窗／莊家展示的截止時間整體往後推「暫停時長」，
+  // 再重排計時器，讓玩家有原本完整的反應時間。
+  private resumeRoom(room: Room) {
+    const elapsed = Date.now() - (room.pausedAt ?? Date.now());
+    const eng = room.engine;
+    if (eng) {
+      // 自摸保護為不限時（MAX_SAFE_INTEGER），不要位移
+      if (eng.claimEndsAt > 0 && eng.claimEndsAt < Number.MAX_SAFE_INTEGER) eng.claimEndsAt += elapsed;
+      if (eng.dealerRevealEndsAt > 0) eng.dealerRevealEndsAt += elapsed;
+    }
+    room.paused = false;
+    room.pausedAt = undefined;
+    this.scheduleClaim(room);
+    this.scheduleDealerReveal(room);
+  }
+
+  // 有玩家斷線 → 全體暫停：凍結會自動推進狀態的計時器，等重連後再排
+  private pauseRoom(room: Room) {
+    if (room.paused) return;
+    room.paused = true;
+    room.pausedAt = Date.now();
+    if (room.claimTimer) clearTimeout(room.claimTimer);
+    room.claimTimer = undefined;
+    room.scheduledClaimId = undefined; // 讓 resumeRoom 能重新排這個吃牌窗
+    if (room.dealerRevealTimer) clearTimeout(room.dealerRevealTimer);
+    room.dealerRevealTimer = undefined;
   }
 
   startGame(playerId: string): ActionResult {
@@ -193,22 +226,36 @@ export class GameServer {
     if (rr.reason === 'draw') rr.nextDealerSeat = room.lastDealerSeat;
     rr.scores = room.players.map((p) => ({ seat: p.seat, total: room.scores.get(p.id) ?? 0 }));
     this.syncScores(room);
-    this.scheduleNextHand(room); // 一段時間後自動開下一局（§4.2/§12）
+    room.readyIds = new Set(); // 結算後等待全員按「繼續」才開下一局（§13）
   }
 
-  // 排定續局計時器
-  private scheduleNextHand(room: Room) {
-    if (room.nextHandTimer) clearTimeout(room.nextHandTimer);
-    room.nextHandTimer = setTimeout(() => this.startNextHand(room), NEXT_HAND_MS);
+  // 玩家於結算畫面按「繼續」：全員（在線者）都按下才開下一局
+  readyContinue(playerId: string): ActionResult {
+    const room = this.findRoomByPlayer(playerId);
+    if (!room) return { ok: false, error: '不在任何房間' };
+    if (room.phase !== 'FINISHED') return { ok: false, error: '目前無法繼續' };
+    if (room.paused) return { ok: false, error: '有玩家斷線，遊戲暫停中', room };
+    room.readyIds.add(playerId);
+    this.maybeStartNextHand(room);
+    return { ok: true, room };
+  }
+
+  // 在線玩家是否都已按「繼續」（且人數足夠）
+  private allReady(room: Room): boolean {
+    const connected = room.players.filter((p) => p.connected);
+    if (connected.length < MIN_PLAYERS) return false;
+    return connected.every((p) => room.readyIds.has(p.id));
+  }
+
+  // 條件成立就開下一局；否則維持結算畫面
+  private maybeStartNextHand(room: Room) {
+    if (room.phase === 'FINISHED' && this.allReady(room)) this.startNextHand(room);
   }
 
   // 開下一局：沿用累計分數，莊家為上一局結算指定者（胡牌者／流局原莊，§4.2）
   private startNextHand(room: Room) {
-    room.nextHandTimer = undefined;
     if (!this.rooms.has(room.id) || room.phase !== 'FINISHED' || !room.engine) return;
-    const connected = room.players.filter((p) => p.connected).length;
-    if (connected === 0) return; // 全離線，停止續局
-    if (connected < MIN_PLAYERS) return this.scheduleNextHand(room); // 人數不足，稍後再試
+    room.readyIds = new Set(); // 開新局，清空繼續狀態
 
     const prev = room.engine.roundResult;
     const dealerSeat =
@@ -233,6 +280,7 @@ export class GameServer {
   action(playerId: string, type: ActionType, cardId?: string): ActionResult {
     const room = this.findRoomByPlayer(playerId);
     if (!room || !room.engine) return { ok: false, error: '目前沒有進行中的牌局' };
+    if (room.paused) return { ok: false, error: '有玩家斷線，遊戲暫停中', room };
     const res = room.engine.apply(playerId, type, cardId);
     if (!res.ok) return { ok: false, error: res.error, room };
     // 莊家一經決定（§4.1）即同步為續局／流局連任的依據
@@ -248,6 +296,7 @@ export class GameServer {
 
   // 決定莊家後排一個展示計時器：時間到才發牌並開局（§4.1），讓玩家先看清抽到的牌
   private scheduleDealerReveal(room: Room) {
+    if (room.paused) return; // 暫停中不推進狀態（重連後由 resumeRoom 重排）
     const eng = room.engine;
     if (!eng || eng.stage !== 'DEAL_DRAW' || !eng.dealerDecided) return;
     if (room.dealerRevealTimer) return; // 已排程
@@ -269,6 +318,7 @@ export class GameServer {
 
   // 開著吃牌窗時排一個計時器：兩秒到就重推狀態，讓下一家的「摸牌」按鈕變可用（不自動結算）
   private scheduleClaim(room: Room) {
+    if (room.paused) return; // 暫停中不排吃牌窗計時器（重連後由 resumeRoom 重排）
     const eng = room.engine;
     if (!eng || eng.stage !== 'CLAIM') {
       if (room.claimTimer) clearTimeout(room.claimTimer);
@@ -294,17 +344,20 @@ export class GameServer {
       player.connected = false;
       player.socketId = null;
       room.engine?.setConnected(player.id, false);
-      // 若整桌都離線且未開局，回收房間
-      if (room.players.every((p) => !p.connected) && room.phase === 'WAITING') {
+      // 整桌都離線 → 沒有人可等待重連，直接回收房間（含未開局的等待房）
+      if (room.players.every((p) => !p.connected)) {
         this.disposeRoom(room);
         return undefined;
       }
+      // 對局進行中（含單局結算）意外斷線 → 全體暫停，等待該玩家重連
+      if (room.phase === 'PLAYING' || room.phase === 'FINISHED') this.pauseRoom(room);
       return room;
     }
     return undefined;
   }
 
-  // 玩家按下離台（§13：整場遊戲結束）：停止續局，全離線則回收房間
+  // 玩家按下離開遊戲：對局進行中 → 整場結束、顯示最終計分版給其餘玩家；
+  // 等待中／已結束 → 移除該玩家，全空則回收房間。
   leaveRoom(playerId: string): Room | undefined {
     const room = this.findRoomByPlayer(playerId);
     if (!room) return undefined;
@@ -313,12 +366,22 @@ export class GameServer {
       p.connected = false;
       p.socketId = null;
       this.tokenIndex.delete(p.token);
+      room.readyIds.delete(p.id);
       room.engine?.setConnected(playerId, false);
     }
-    if (room.nextHandTimer) {
-      clearTimeout(room.nextHandTimer); // 有人離台 → 停止續局
-      room.nextHandTimer = undefined;
+
+    // 對局進行中（含單局結算）有人離開 → 結束整場，準備最終計分版
+    if (room.phase === 'PLAYING' || room.phase === 'FINISHED') {
+      this.endGame(room, p?.name ?? '玩家');
+      // 觸發者仍是全員離線的話直接回收（例如兩人房另一人已斷線）
+      if (room.players.every((x) => !x.connected)) {
+        this.disposeRoom(room);
+        return undefined;
+      }
+      return room;
     }
+
+    // 等待中或已結束：全空則回收房間
     if (room.players.every((x) => !x.connected)) {
       this.disposeRoom(room);
       return undefined;
@@ -326,9 +389,27 @@ export class GameServer {
     return room;
   }
 
+  // 結束整場：凍結計時器、切到 ENDED，組出最終計分版（各家跨局累計頭數）
+  private endGame(room: Room, leaverName: string) {
+    if (room.phase === 'ENDED') return;
+    if (room.claimTimer) clearTimeout(room.claimTimer);
+    if (room.dealerRevealTimer) clearTimeout(room.dealerRevealTimer);
+    room.claimTimer = undefined;
+    room.dealerRevealTimer = undefined;
+    room.scheduledClaimId = undefined;
+    room.paused = false;
+    room.phase = 'ENDED';
+    room.endResult = {
+      reason: 'playerLeft',
+      leaverName,
+      scores: room.players
+        .map((pl) => ({ seat: pl.seat, name: pl.name, total: room.scores.get(pl.id) ?? 0 }))
+        .sort((a, b) => b.total - a.total),
+    };
+  }
+
   private disposeRoom(room: Room) {
     if (room.claimTimer) clearTimeout(room.claimTimer);
-    if (room.nextHandTimer) clearTimeout(room.nextHandTimer);
     if (room.dealerRevealTimer) clearTimeout(room.dealerRevealTimer);
     this.rooms.delete(room.id);
     this.codeIndex.delete(room.code);

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import type { Card } from '@nine-cards/shared';
 import { GameServer } from '../src/game/gameServer.js';
 
@@ -17,11 +17,8 @@ const yellowNine = (): Card[] => [
   c('黃', '兵'), c('黃', '兵', 2),
 ];
 
-describe('多局／續局（§4.2/§12）', () => {
-  beforeEach(() => vi.useFakeTimers());
-  afterEach(() => vi.useRealTimers());
-
-  it('胡牌後累計分數保留、下一局由胡牌者當莊', () => {
+describe('多局／續局（§4.2/§12/§13）', () => {
+  it('胡牌後累計分數保留、全員按繼續才開下一局、由胡牌者當莊', () => {
     const gs = new GameServer();
     gs.setBroadcaster(() => {});
     const created = gs.createRoom('A', 'sock0', false);
@@ -56,8 +53,11 @@ describe('多局／續局（§4.2/§12）', () => {
     expect(room.scores.get(room.players[0].id)).toBe(-5);
     expect(room.engine!.roundResult!.nextDealerSeat).toBe(1);
 
-    // 續局計時器到 → 開下一局
-    vi.advanceTimersByTime(6000);
+    // 只有一人按繼續 → 仍停留結算畫面
+    gs.readyContinue(room.players[0].id);
+    expect(gs.getRoom(roomId)!.phase).toBe('FINISHED');
+    // 全員按繼續 → 開下一局
+    gs.readyContinue(room.players[1].id);
     const room2 = gs.getRoom(roomId)!;
     expect(room2.phase).toBe('PLAYING');
     expect(room2.engine!.players[1].isDealer).toBe(true); // 胡牌者當莊
@@ -66,7 +66,7 @@ describe('多局／續局（§4.2/§12）', () => {
     expect(room2.engine!.players[0].score).toBe(-5);
   });
 
-  it('有人離台 → 停止續局（§13）', () => {
+  it('有人離開 → 整場結束、顯示最終計分版（§1）', () => {
     const gs = new GameServer();
     gs.setBroadcaster(() => {});
     const created = gs.createRoom('A', 'sock0', false);
@@ -87,13 +87,48 @@ describe('多局／續局（§4.2/§12）', () => {
     eng.roundResult = null;
     eng.players[1].hand = yellowNine();
     room.phase = 'PLAYING';
-    gs.action(bId, 'declareWin');
+    gs.action(bId, 'declareWin'); // B 胡牌：B +5、A -5
 
-    gs.leaveRoom(hostId); // A 離台
-    vi.advanceTimersByTime(6000);
-    // 房間仍在（B 還在線），但不再自動續局
+    gs.leaveRoom(hostId); // A 離開 → 整場結束
     const room2 = gs.getRoom(roomId)!;
-    expect(room2.phase).toBe('FINISHED');
-    expect(room2.nextHandTimer).toBeUndefined();
+    expect(room2.phase).toBe('ENDED');
+    expect(room2.endResult).toBeTruthy();
+    expect(room2.endResult!.leaverName).toBe('A');
+    // 計分版依累計頭數由高到低排序：B(+5) 在前、A(-5) 在後
+    const board = room2.endResult!.scores;
+    expect(board[0].name).toBe('B');
+    expect(board[0].total).toBe(5);
+    expect(board[board.length - 1].name).toBe('A');
+    expect(board[board.length - 1].total).toBe(-5);
+
+    // 已結束後 B 想繼續應被拒（牌局已非 FINISHED）
+    const cont = gs.readyContinue(bId);
+    expect(cont.ok).toBe(false);
+  });
+
+  it('意外斷線 → 全體暫停，重連後解除暫停（§2）', () => {
+    const gs = new GameServer();
+    gs.setBroadcaster(() => {});
+    const created = gs.createRoom('A', 'sock0', false);
+    gs.joinByCode(created.room!.code, 'B', 'sock1');
+    const hostId = created.player!.id;
+    const roomId = created.room!.id;
+    gs.startGame(hostId);
+    const room = gs.getRoom(roomId)!;
+    room.phase = 'PLAYING';
+    const bId = room.players[1].id;
+
+    // B 意外斷線 → 暫停
+    gs.markDisconnected('sock1');
+    expect(room.paused).toBe(true);
+    // 暫停中任何動作皆被擋
+    expect(gs.action(hostId, 'draw').ok).toBe(false);
+
+    // B 重連 → 解除暫停
+    const res = gs.resume(room.players[1].token, 'sock1b');
+    expect(res.ok).toBe(true);
+    expect(room.paused).toBe(false);
+    expect(room.players[1].connected).toBe(true);
+    void bId;
   });
 });

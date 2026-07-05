@@ -5,6 +5,7 @@ import {
   type RoomView,
   type PersonalGameState,
   type GameOverPayload,
+  type GameEndedPayload,
   type ActionType,
   type JoinResult,
   type LobbyRoom,
@@ -35,6 +36,7 @@ export interface GameApi {
   room: RoomView | null;
   game: PersonalGameState | null;
   gameOver: GameOverPayload | null;
+  gameEnded: GameEndedPayload | null;
   toast: string | null;
   savedName: string;
   lobby: LobbyRoom[];
@@ -45,6 +47,7 @@ export interface GameApi {
   unwatchLobby: () => void;
   startGame: () => void;
   act: (type: ActionType, cardId?: string) => void;
+  readyContinue: () => void;
   clearToast: () => void;
   leave: () => void;
 }
@@ -57,6 +60,7 @@ export function useGame(): GameApi {
   const [room, setRoom] = useState<RoomView | null>(null);
   const [game, setGame] = useState<PersonalGameState | null>(null);
   const [gameOver, setGameOver] = useState<GameOverPayload | null>(null);
+  const [gameEnded, setGameEnded] = useState<GameEndedPayload | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [lobby, setLobby] = useState<LobbyRoom[]>([]);
   const savedName = localStorage.getItem(LS_NAME) ?? '';
@@ -83,6 +87,7 @@ export function useGame(): GameApi {
       if (state.phase !== 'FINISHED') setGameOver(null); // 下一局開始 → 收掉結算視窗
     });
     socket.on(EVT.GAME_OVER, (payload: GameOverPayload) => setGameOver(payload));
+    socket.on(EVT.GAME_ENDED, (payload: GameEndedPayload) => setGameEnded(payload)); // 整場結束 → 最終計分版
     socket.on(EVT.ERROR_MSG, (p: { message: string }) => setToast(p.message));
     socket.on(EVT.LOBBY_UPDATE, (list: LobbyRoom[]) => setLobby(list));
 
@@ -141,13 +146,17 @@ export function useGame(): GameApi {
     },
     [identity],
   );
+  const readyContinue = useCallback(() => {
+    if (identity) socketRef.current?.emit(EVT.CONTINUE, identity.playerId); // §13：全員按繼續才開下一局
+  }, [identity]);
   const leave = useCallback(() => {
-    if (identity) socketRef.current?.emit(EVT.LEAVE, identity.playerId); // §13：離台結束整場
+    if (identity) socketRef.current?.emit(EVT.LEAVE, identity.playerId); // 離開此場遊戲（對局中→整場結束）
     localStorage.removeItem(LS_TOKEN);
     setIdentity(null);
     setRoom(null);
     setGame(null);
     setGameOver(null);
+    setGameEnded(null);
     setScreen('home');
   }, [identity]);
 
@@ -160,6 +169,7 @@ export function useGame(): GameApi {
     room,
     game,
     gameOver,
+    gameEnded,
     toast,
     savedName,
     lobby,
@@ -170,6 +180,7 @@ export function useGame(): GameApi {
     unwatchLobby,
     startGame,
     act,
+    readyContinue,
     clearToast,
     leave,
   };

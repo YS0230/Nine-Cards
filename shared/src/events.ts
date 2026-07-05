@@ -1,4 +1,10 @@
-import type { ActionType, PersonalGameState, RoomView, GameOverPayload } from './types.js';
+import type {
+  ActionType,
+  PersonalGameState,
+  RoomView,
+  GameOverPayload,
+  GameEndedPayload,
+} from './types.js';
 
 // Socket.IO 事件名稱（前後端共用常數，避免打錯字）
 export const EVT = {
@@ -9,6 +15,7 @@ export const EVT = {
   RESUME: 'resume',
   START_GAME: 'startGame',
   ACTION: 'action',
+  CONTINUE: 'continue', // 結算畫面按「繼續」（全員按下才開下一局）
   LEAVE: 'leave',
   WATCH_LOBBY: 'watchLobby',
   UNWATCH_LOBBY: 'unwatchLobby',
@@ -16,6 +23,7 @@ export const EVT = {
   ROOM_UPDATE: 'roomUpdate',
   GAME_STATE: 'gameState',
   GAME_OVER: 'gameOver',
+  GAME_ENDED: 'gameEnded', // 整場結束（有人離開）→ 顯示最終計分版
   ERROR_MSG: 'errorMsg',
   LOBBY_UPDATE: 'lobbyUpdate',
 } as const;
@@ -50,7 +58,7 @@ export interface ActionReq {
 }
 
 // ── Server → Client payloads ─────────────────────────────
-export type { PersonalGameState, RoomView, GameOverPayload };
+export type { PersonalGameState, RoomView, GameOverPayload, GameEndedPayload };
 export interface ErrorPayload {
   message: string;
 }

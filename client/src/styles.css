@@ -705,6 +705,87 @@ body {
   opacity: 0.85;
 }
 
+/* 結算：繼續 / 離開（§13 全員按繼續才開下一局） */
+.result-ready {
+  font-size: 13px;
+  opacity: 0.8;
+}
+.result-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+/* 頭部離開鍵：外觀維持 chip，但可點擊 */
+.leave-chip {
+  border: none;
+  cursor: pointer;
+  color: #ffdada;
+  background: rgba(180, 40, 40, 0.4);
+  margin-left: auto;
+  font: inherit;
+  font-size: 13px;
+}
+.leave-chip:active {
+  transform: scale(0.96);
+}
+
+/* ── 胡牌後手動抽五隻（§9.2）面板 ─────────────── */
+.df-hint {
+  font-size: 13px;
+  opacity: 0.8;
+}
+.df-progress {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--gold);
+}
+.df-cards {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.df-slot {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.df-slot.hit {
+  outline: 3px solid var(--gold);
+  border-radius: 7px;
+}
+.df-badge {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: var(--gold);
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.df-slot .df-placeholder {
+  width: 38px;
+  height: 68px;
+  border-radius: 5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  font-weight: 800;
+  color: rgba(255, 255, 255, 0.4);
+  border: 2px dashed rgba(255, 255, 255, 0.25);
+}
+.df-wait {
+  font-size: 14px;
+  opacity: 0.8;
+}
+
 /* ── 決定莊家（§4.1）抽牌面板 ─────────────────── */
 .dealer-draw .dd-hint {
   font-size: 13px;
@@ -800,4 +881,51 @@ body {
   font-size: 15px;
   z-index: 30;
   max-width: 90%;
+}
+
+/* ── 首頁選單：兩顆並排的次要按鈕 ───────────────── */
+.menu-row {
+  display: flex;
+  gap: 12px;
+}
+.menu-row .btn {
+  flex: 1;
+}
+
+/* ── 斷線暫停遮罩（§2）───────────────────────────── */
+.paused-overlay {
+  z-index: 26; /* 蓋過一般結算/抽牌面板（20），確保「等待重連」最上層 */
+  background: rgba(0, 0, 0, 0.82);
+}
+.paused-card {
+  align-items: center;
+}
+.paused-msg {
+  font-size: 15px;
+  margin: 0;
+}
+.paused-msg b {
+  color: var(--gold);
+}
+.paused-spinner {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 4px solid rgba(255, 255, 255, 0.18);
+  border-top-color: var(--gold);
+  animation: paused-spin 0.9s linear infinite;
+}
+@keyframes paused-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ── 整場結束計分版（§1）─────────────────────────── */
+.ended-overlay {
+  z-index: 28; /* 最終計分版蓋過暫停遮罩 */
+}
+.score-table tr.winner-row td {
+  color: var(--gold);
+  font-weight: 700;
 }

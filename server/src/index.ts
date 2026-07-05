@@ -50,12 +50,26 @@ function pushState(room: Room) {
     }
     return;
   }
+  // ENDED → 整場結束，推最終計分版給每位在線玩家
+  if (room.phase === 'ENDED' && room.endResult) {
+    for (const p of room.players) {
+      if (p.connected && p.socketId) io.to(p.socketId).emit(EVT.GAME_ENDED, room.endResult);
+    }
+    return;
+  }
   // PLAYING / FINISHED → 個人化視圖（隱藏他人手牌）
   const engine = room.engine!;
+  // 結算後已按「繼續」的座位（§13）；engine 不知房間 readyIds，於此補上
+  const readySeats = room.players.filter((p) => room.readyIds.has(p.id)).map((p) => p.seat);
+  // 暫停遮罩：斷線中的玩家名稱（其餘在線者據以顯示等待重連遮罩）
+  const disconnectedNames = room.players.filter((p) => !p.connected).map((p) => p.name);
   for (const p of room.players) {
     if (!p.connected || !p.socketId) continue;
     const state = engine.viewFor(p.id);
     state.roomId = room.id;
+    state.continueReady = readySeats;
+    state.paused = room.paused;
+    state.disconnectedNames = disconnectedNames;
     io.to(p.socketId).emit(EVT.GAME_STATE, state);
   }
   if (room.phase === 'FINISHED' && engine.roundResult) {
@@ -124,6 +138,12 @@ io.on('connection', (socket) => {
 
   socket.on(EVT.ACTION, (playerId: string, req: ActionReq) => {
     const r = game.action(playerId, req?.type, req?.cardId);
+    if (!r.ok) emitError(socket.id, r.error);
+    if (r.room) pushState(r.room);
+  });
+
+  socket.on(EVT.CONTINUE, (playerId: string) => {
+    const r = game.readyContinue(playerId);
     if (!r.ok) emitError(socket.id, r.error);
     if (r.room) pushState(r.room);
   });

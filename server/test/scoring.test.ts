@@ -125,14 +125,24 @@ describe('付款分配', () => {
     expect(bySeat[2]).toBe(0); // 其他人不付
   });
 
-  it('自摸：全體付、可抽五隻', () => {
+  it('自摸：全體付、可抽五隻（胡牌者手動一張一張抽）', () => {
     // 摸牌者胡自己摸的牌（fromSeat=1、kind=drawn）；牌堆頂兩張黃帥供抽五隻命中
     const eng = claimWin('drawn', 1, [c('黃', '帥', 3), c('黃', '帥', 4), c('紅', '兵'), c('紅', '兵', 2), c('紅', '兵', 3)]);
-    const r = eng.apply('1', 'declareWin');
-    expect(r.ok).toBe(true);
+    expect(eng.apply('1', 'declareWin').ok).toBe(true);
+    // 胡牌後進入手動抽五隻，尚未結算
+    expect(eng.stage).toBe('DRAW_FIVE');
+    expect(eng.roundResult).toBeNull();
+    // 只有胡牌者能抽；他家不能
+    expect(eng.apply('2', 'drawFive').ok).toBe(false);
+    // 胡牌者一張一張抽，抽滿五張才結算
+    for (let i = 0; i < 5; i++) {
+      expect(eng.roundResult).toBeNull();
+      expect(eng.apply('1', 'drawFive').ok).toBe(true);
+    }
     const rr = eng.roundResult!;
     expect(rr.category).toBe('自摸');
     expect(rr.drawFive).not.toBeNull();
+    expect(rr.drawFive!.marks).toEqual([true, true, false, false, false]); // 前兩張黃帥加頭
     expect(rr.breakdown.color).toBe(5);
     expect(rr.breakdown.drawFive).toBe(2); // 命中兩張黃帥
     expect(rr.heads).toBe(7);
@@ -140,5 +150,15 @@ describe('付款分配', () => {
     expect(bySeat[1]).toBe(14); // 兩位付家各 7
     expect(bySeat[0]).toBe(-7);
     expect(bySeat[2]).toBe(-7);
+  });
+
+  it('抽五隻最後一張命中 → 加兩頭（手動抽）', () => {
+    // 前四張不命中、第五張命中黃帥 → +2
+    const eng = claimWin('drawn', 1, [c('紅', '兵'), c('紅', '兵', 2), c('紅', '兵', 3), c('紅', '兵', 4), c('黃', '帥', 3)]);
+    expect(eng.apply('1', 'declareWin').ok).toBe(true);
+    for (let i = 0; i < 5; i++) expect(eng.apply('1', 'drawFive').ok).toBe(true);
+    const rr = eng.roundResult!;
+    expect(rr.breakdown.drawFive).toBe(2); // 最後一張命中 +2
+    expect(rr.drawFive!.marks).toEqual([false, false, false, false, true]);
   });
 });
