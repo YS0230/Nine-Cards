@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { GameApi } from '../useGame.js';
 import { Card } from './Card.js';
-import type { PublicPlayer, Card as CardT } from '@nine-cards/shared';
+import type { PublicPlayer, Card as CardT, GameOverPayload } from '@nine-cards/shared';
 
 export function Table({ api }: { api: GameApi }) {
   const g = api.game!;
@@ -9,6 +9,16 @@ export function Table({ api }: { api: GameApi }) {
 
   const mySeat = g.you.seat;
   const opponents = g.players.filter((p) => p.seat !== mySeat).sort((a, b) => a.seat - b.seat);
+  const me = g.players.find((p) => p.seat === mySeat);
+  const myScore = me?.score ?? 0;
+  const myTenpai = me?.isTenpai ?? false;
+  const deadIdSet = new Set(g.you.deadIds); // 我的死牌 id（出牌時須先出，§7.3）
+  const hasDead = deadIdSet.size > 0;
+  // 死牌移到公開區顯示（依 FIFO 順序）；暗手牌只留非死牌
+  const myDeadCards = g.you.deadIds
+    .map((id) => g.you.hand.find((c) => c.id === id))
+    .filter((c): c is CardT => !!c);
+  const myHandCards = g.you.hand.filter((c) => !deadIdSet.has(c.id));
   const canDiscard = g.legalActions.includes('discard');
   const canDraw = g.legalActions.includes('draw');
   const canEat = g.legalActions.includes('eat');
@@ -61,9 +71,11 @@ export function Table({ api }: { api: GameApi }) {
             ? '不吃的話，按「摸牌」換你'
             : '輪到你，請摸牌'
           : canDiscard
-            ? selected
-              ? '按「打出」送出這張牌'
-              : '點選一張要打出的牌'
+            ? hasDead
+              ? '手上有死牌，需先打出死牌'
+              : selected
+                ? '按「打出」送出這張牌'
+                : '點選一張要打出的牌'
             : `等待 ${turnName} 行動…`;
 
   return (
@@ -71,6 +83,7 @@ export function Table({ api }: { api: GameApi }) {
       <header className="table-top">
         <span className="chip">房 {api.room?.code ?? g.roomId.slice(0, 4)}</span>
         <span className="chip">牌堆 {g.deckCount}</span>
+        <span className="chip">我 {myScore} 頭{myTenpai && ' · 聽'}</span>
         <span className={`chip turn ${myTurn ? 'me' : ''}`}>
           {myTurn ? '輪到你' : `輪到 ${turnName}`}
         </span>
@@ -120,8 +133,8 @@ export function Table({ api }: { api: GameApi }) {
 
       {/* 我的區域：固定高度，melds 保留空間、動作列固定不跳動 */}
       <section className="me">
-        {/* 吃牌（公開）與暗手牌同一列、同尺寸共用空間；中間以分隔線區隔 */}
-        <div className="hand-row" aria-label="我的吃牌與手牌">
+        {/* 公開區（吃牌對子＋死牌單張）｜分隔線｜暗手牌，同一列、同尺寸、依寬度自動縮放 */}
+        <div className="hand-row" aria-label="我的公開區與手牌">
           {g.you.melds.map((pair, i) => (
             <div className="meld" key={`m${i}`}>
               {pair.map((card) => (
@@ -129,16 +142,33 @@ export function Table({ api }: { api: GameApi }) {
               ))}
             </div>
           ))}
-          {g.you.melds.length > 0 && <div className="hand-divider" aria-hidden="true" />}
-          {g.you.hand.map((card) => (
-            <Card
-              key={card.id}
-              card={card}
-              selectable={canDiscard}
-              selected={selected === card.id}
-              onClick={canDiscard ? () => setSelected(card.id) : undefined}
-            />
+          {/* 死牌：公開區中的單張（未成對即為死牌，§7.2），有死牌時即為可打出的牌 */}
+          {myDeadCards.map((card) => (
+            <div className="dead-single" key={card.id}>
+              <Card
+                card={card}
+                selectable={canDiscard}
+                selected={selected === card.id}
+                onClick={canDiscard ? () => setSelected(card.id) : undefined}
+              />
+            </div>
           ))}
+          {(g.you.melds.length > 0 || myDeadCards.length > 0) && (
+            <div className="hand-divider" aria-hidden="true" />
+          )}
+          {myHandCards.map((card) => {
+            // 有死牌時只能打死牌（先進先出／聽牌例外由伺服器把關，§7.3）
+            const pickable = canDiscard && !hasDead;
+            return (
+              <Card
+                key={card.id}
+                card={card}
+                selectable={pickable}
+                selected={selected === card.id}
+                onClick={pickable ? () => setSelected(card.id) : undefined}
+              />
+            );
+          })}
         </div>
 
         <div className="prompt">{prompt}</div>
@@ -173,20 +203,170 @@ export function Table({ api }: { api: GameApi }) {
         </div>
       )}
 
-      {api.gameOver && (
-        <div className="overlay">
-          <div className="result">
-            <h2>
-              {api.gameOver.reason === 'draw'
-                ? '流局'
-                : `${api.gameOver.winnerName ?? ''} 胡牌！`}
-            </h2>
-            <button className="btn primary" onClick={api.leave}>
-              離開牌桌
-            </button>
-          </div>
-        </div>
+      {/* 決定莊家（§4.1）：開局各玩家自己抽牌 */}
+      {g.dealerDraw && (
+        <DealerDrawPanel
+          dealerDraw={g.dealerDraw}
+          players={g.players}
+          mySeat={mySeat}
+          canDraw={canDraw}
+          message={g.message}
+          onDraw={() => api.act('draw')}
+        />
       )}
+
+      {api.gameOver && (
+        <RoundResult
+          result={api.gameOver}
+          players={g.players}
+          onLeave={api.leave}
+        />
+      )}
+    </div>
+  );
+}
+
+// 決定莊家（§4.1）：每位玩家各自摸一張，先比權重（帥/將最大）再比顏色（黃＞紅＞綠＞白）
+function DealerDrawPanel({
+  dealerDraw,
+  players,
+  mySeat,
+  canDraw,
+  message,
+  onDraw,
+}: {
+  dealerDraw: { draws: (CardT | null)[]; contenders: number[]; decidedSeat: number | null };
+  players: PublicPlayer[];
+  mySeat: number;
+  canDraw: boolean;
+  message: string | null;
+  onDraw: () => void;
+}) {
+  const nameOf = (seat: number) => players.find((p) => p.seat === seat)?.name ?? `座位${seat}`;
+  const seats = [...players].sort((a, b) => a.seat - b.seat);
+  const contenders = new Set(dealerDraw.contenders);
+  const decided = dealerDraw.decidedSeat; // 已定莊 → 展示三秒
+  const iDrew = dealerDraw.draws[mySeat] != null;
+  return (
+    <div className="overlay">
+      <div className="result dealer-draw">
+        <h2>抽牌決定莊家</h2>
+        <div className="dd-hint">先比大小（帥/將最大），再比顏色（黃＞紅＞綠＞白）</div>
+        <div className="dd-rows">
+          {seats.map((p) => {
+            const card = dealerDraw.draws[p.seat];
+            const isDealer = decided === p.seat;
+            // 展示定莊時不再淡化落敗者；抽牌途中淘汰者才淡化
+            const out = decided == null && !contenders.has(p.seat);
+            return (
+              <div className={`dd-row ${out ? 'out' : ''} ${isDealer ? 'dealer' : ''}`} key={p.seat}>
+                <span className="dd-name">
+                  {p.seat === mySeat ? '你' : nameOf(p.seat)}
+                  {isDealer && <span className="dd-badge">莊</span>}
+                </span>
+                {card ? (
+                  <Card card={card} small />
+                ) : (
+                  <div className="dd-placeholder">?</div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+        {decided != null ? (
+          <div className="dd-msg">
+            {decided === mySeat ? '你' : nameOf(decided)} 當莊！即將發牌…
+          </div>
+        ) : (
+          <>
+            {message && <div className="dd-msg">{message}</div>}
+            {canDraw ? (
+              <button className="btn primary" onClick={onDraw}>
+                摸牌
+              </button>
+            ) : (
+              <div className="dd-wait">{iDrew ? '已抽牌，等待其他玩家…' : '請稍候…'}</div>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// 一局結算：胡牌方式、頭數明細、抽五隻揭示、各家累計分數
+function RoundResult({
+  result,
+  players,
+  onLeave,
+}: {
+  result: GameOverPayload;
+  players: PublicPlayer[];
+  onLeave: () => void;
+}) {
+  const nameOf = (seat: number) => players.find((p) => p.seat === seat)?.name ?? `座位${seat}`;
+  const deltaOf = (seat: number) =>
+    result.payments.find((p) => p.seat === seat)?.delta ?? 0;
+  const rows =
+    result.scores.length > 0
+      ? result.scores
+      : players.map((p) => ({ seat: p.seat, total: p.score }));
+
+  return (
+    <div className="overlay">
+      <div className="result">
+        <h2>
+          {result.reason === 'draw' ? '流局（原莊連任）' : `${result.winnerName ?? ''} 胡牌！`}
+        </h2>
+
+        {result.reason === 'win' && (
+          <>
+            <div className="result-cat">{result.category}｜共 {result.heads} 頭</div>
+            <div className="result-breakdown">
+              顏色 {result.breakdown.color}
+              {result.breakdown.huKai > 0 && ` ＋ 胡開 ${result.breakdown.huKai}`}
+              {result.breakdown.drawFive > 0 && ` ＋ 抽五隻 ${result.breakdown.drawFive}`}
+            </div>
+            {result.drawFive && (
+              <div className="result-drawfive">
+                <div className="rd-label">抽五隻（中 {result.drawFive.qualifying} 張）</div>
+                <div className="rd-cards">
+                  {result.drawFive.cards.map((card, i) => (
+                    <Card key={card.id + i} card={card} small />
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
+        )}
+
+        <table className="score-table">
+          <tbody>
+            {rows.map((s) => {
+              const d = deltaOf(s.seat);
+              return (
+                <tr key={s.seat}>
+                  <td>{nameOf(s.seat)}</td>
+                  <td className={d > 0 ? 'up' : d < 0 ? 'down' : ''}>
+                    {d > 0 ? `+${d}` : d}
+                  </td>
+                  <td className="score-total">{s.total} 頭</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+
+        {result.nextDealerSeat != null && (
+          <div className="result-next">
+            下一局莊家：{nameOf(result.nextDealerSeat)}（即將自動開始…）
+          </div>
+        )}
+
+        <button className="btn primary" onClick={onLeave}>
+          離台
+        </button>
+      </div>
     </div>
   );
 }
@@ -219,18 +399,25 @@ function OpponentSeat({ p, active }: { p: PublicPlayer; active: boolean }) {
       <div className="opp-head">
         {p.isDealer && '👑 '}
         {p.name}
+        {p.isTenpai && <span className="tenpai-badge">聽</span>}
+        <span className="opp-score">{p.score} 頭</span>
         {!p.connected && ' 📴'}
       </div>
-      {/* 吃牌（公開）與暗牌同一列，中間以分隔線區隔 */}
+      {/* 公開區（吃牌對子＋死牌單張）＋分隔線＋暗牌，同一列；死牌以單張未成對表示 */}
       <div className="opp-row">
-        {p.melds.length > 0 && (
+        {(p.melds.length > 0 || p.deadCards.length > 0) && (
           <>
             <div className="opp-melds">
               {p.melds.map((pair, i) => (
-                <div className="meld" key={i}>
+                <div className="meld" key={`m${i}`}>
                   {pair.map((card) => (
                     <Card key={card.id} card={card} small />
                   ))}
+                </div>
+              ))}
+              {p.deadCards.map((card) => (
+                <div className="dead-single" key={card.id}>
+                  <Card card={card} small />
                 </div>
               ))}
             </div>

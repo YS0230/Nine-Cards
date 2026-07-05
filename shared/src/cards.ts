@@ -60,6 +60,41 @@ export function shuffle<T>(arr: T[], rng: () => number = Math.random): T[] {
   return a;
 }
 
+/** 抽牌比大小的強度：先比權重（×10），平手再比顏色（§4.1）。 */
+export function cardDrawStrength(card: Card): number {
+  return RANK_WEIGHT[card.rank] * 10 + COLOR_WEIGHT[card.color];
+}
+
+export interface DealerDraw {
+  dealerSeat: number;
+  draws: Card[]; // 各座位最終抽到的牌（含重抽後的結果）
+}
+
+/**
+ * 抽牌決定莊家（§4.1）：每位玩家抽一張，先比權重再比顏色；
+ * 平局（同權重同顏色）者重抽，已淘汰者保留原牌，直到分出唯一莊家。
+ */
+export function pickDealerByDraw(seatCount: number, rng: () => number = Math.random): DealerDraw {
+  const deck = shuffle(buildDeck(), rng);
+  let cursor = 0;
+  const draw = () => deck[cursor++ % deck.length];
+  const draws: Card[] = Array.from({ length: seatCount }, () => draw());
+
+  let contenders = draws.map((_, s) => s);
+  while (contenders.length > 1) {
+    let best = -Infinity;
+    for (const s of contenders) best = Math.max(best, cardDrawStrength(draws[s]));
+    const tied = contenders.filter((s) => cardDrawStrength(draws[s]) === best);
+    if (tied.length === 1) {
+      contenders = tied;
+      break;
+    }
+    for (const s of tied) draws[s] = draw(); // 平局者重抽
+    contenders = tied;
+  }
+  return { dealerSeat: contenders[0], draws };
+}
+
 /** 同一種牌的鍵（同花同種才視為同一種）。 */
 export function kindKey(card: Card): string {
   return `${card.color}_${card.rank}`;
@@ -94,6 +129,20 @@ export function isWinningSet(allCards: Card[]): boolean {
     if (n % 2 !== 0) return false; // 有單張或三張 → 未胡
   }
   return true;
+}
+
+/**
+ * 是否聽牌（§7）：差一對即可胡。owned＝暗手牌＋吃牌對子＋死牌，需正好 9 張，
+ * 且存在某一種牌能補成五對。
+ */
+export function isTenpai(owned: Card[]): boolean {
+  if (owned.length !== WIN_PAIRS * 2 - 1) return false; // 需正好 9 張（差一張）
+  for (const color of COLORS) {
+    for (const rank of RANKS_BY_COLOR[color]) {
+      if (isWinningSet([...owned, { id: 'probe', color, rank }])) return true;
+    }
+  }
+  return false;
 }
 
 /**

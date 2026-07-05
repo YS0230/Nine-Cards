@@ -14,11 +14,17 @@ import {
   shuffle,
   isPair,
   isWinningSet,
+  isTenpai,
   hasMatch,
+  colorScore,
+  huKaiBonus,
+  drawFiveBonus,
+  cardDrawStrength,
   type Card,
 } from '@nine-cards/shared';
 import type {
   ActionType,
+  GameOverPayload,
   PersonalGameState,
   PublicPlayer,
   RoomPhase,
@@ -33,15 +39,25 @@ interface EnginePlayer {
   id: string;
   name: string;
   seat: number;
-  hand: Card[]; // 暗手牌
+  hand: Card[]; // 暗手牌（死牌也仍留在 hand，另以 deadIds 標記並公開）
   melds: Card[][]; // 已公開吃牌對子
+  deadIds: string[]; // 死牌在 hand 中的 id，FIFO 順序（§7.2/7.3）
   connected: boolean;
   isDealer: boolean;
+  score: number; // 本場累計頭數（由 gameServer 跨局維護，viewFor 帶出）
 }
 
-// DRAW：輪到的人摸牌；CLAIM：牌可被吃/胡的時間窗（尚無人持有）；
+// 胡牌時據以計分的情境（§9.2 抽五隻資格、§10.1 胡開）
+interface WinContext {
+  winningCard?: Card | null; // 胡的那張（天胡／開手胡為 null）
+  loserSeat?: number | null; // 放槍者（只有他付）；null = 自摸/摸牌胡，全體付
+  handBefore?: Card[]; // 加入胡牌張之前的暗手牌（供胡開判定）
+}
+
+// DEAL_DRAW：開局各玩家自己抽一張決定莊家（§4.1）；DRAW：輪到的人摸牌；
+// CLAIM：牌可被吃/胡的時間窗（尚無人持有）；
 // EATING：已有人暫定吃牌、待其打出（期間高優先者可搶）；DISCARD：莊家開局打牌。
-type Stage = 'DRAW' | 'CLAIM' | 'EATING' | 'DISCARD';
+type Stage = 'DEAL_DRAW' | 'DRAW' | 'CLAIM' | 'EATING' | 'DISCARD';
 
 interface Pending {
   card: Card;
@@ -53,6 +69,7 @@ interface Tentative {
   seat: number;
   meldIndex: number; // 暫定對子在該玩家 melds 中的索引
   match: Card; // 從手牌拿出來配對的那張
+  matchWasDead: boolean; // 配對牌原本是死牌（被搶時需還原死牌狀態）
 }
 
 export interface ApplyResult {
@@ -63,6 +80,8 @@ export interface ApplyResult {
 const DRAW_GAME_FLOOR = 9; // 牌堆剩 9 張仍無人胡則流局（§12）
 // 下一家可摸牌前的等待時間（可用環境變數 CLAIM_WINDOW_MS 覆寫，測試用）
 export const CLAIM_WINDOW_MS = Number(process.env.CLAIM_WINDOW_MS ?? 5000);
+// 決定莊家後、面板停留讓玩家查看抽到的牌的時間（可用 DEALER_REVEAL_MS 覆寫）
+export const DEALER_REVEAL_MS = Number(process.env.DEALER_REVEAL_MS ?? 3000);
 
 export class GameEngine {
   players: EnginePlayer[];
@@ -75,6 +94,7 @@ export class GameEngine {
   winnerSeat: number | null = null;
   drawGame = false;
   message: string | null = null;
+  roundResult: GameOverPayload | null = null; // 一局結束的結算（scores/nextDealerSeat 由 gameServer 補）
 
   // 吃牌窗狀態
   claimOrder: number[] = []; // 依優先順序（胡>吃、下家優先）排好的可宣告座位
@@ -83,25 +103,102 @@ export class GameEngine {
   claimId = 0; // 每開一個新窗 +1，供伺服器排程對齊
   claimEndsAt = 0; // 下一家可摸牌的時間點（epoch ms）
   protectedSelfEat = false; // 自摸吃保護：摸牌者可吃/胡自己的牌且無他家能胡 → 不限時、下家不能先摸
+  tenpai: boolean[] = []; // 各座位是否聽牌（進入聽牌時宣告一次，§7）
+
+  // 決定莊家（§4.1）互動抽牌狀態
+  dealerSeat: number | null = null; // 已決定的莊家座位（DEAL_DRAW 進行中為 null）
+  dealerDraws: (Card | null)[] = []; // 各座位此輪抽到的牌（null＝尚未抽）
+  dealerContenders: number[] = []; // 仍在競爭莊家的座位（平手時只留平手者重抽）
+  dealerDecided = false; // 已決定莊家、展示抽牌結果中（停留數秒後才發牌）
+  dealerRevealEndsAt = 0; // 展示結束、正式發牌的時間點（epoch ms）
 
   private readonly n: number;
+  private readonly rng: () => number;
 
-  constructor(seats: SeatInit[], dealerSeat: number, rng: () => number = Math.random) {
+  // dealerSeat=null：開局由玩家自己抽牌決定莊家（§4.1，僅第一局）；
+  // 傳入座位號：直接指定莊家並發牌（續局／測試用）。
+  constructor(seats: SeatInit[], dealerSeat: number | null, rng: () => number = Math.random) {
     this.n = seats.length;
+    this.rng = rng;
+    this.tenpai = new Array(this.n).fill(false);
     this.players = seats.map((s, seat) => ({
       id: s.id,
       name: s.name,
       seat,
       hand: [],
       melds: [],
+      deadIds: [],
       connected: true,
-      isDealer: seat === dealerSeat,
+      isDealer: false,
+      score: 0,
     }));
-    this.deal(dealerSeat, rng);
+    if (dealerSeat === null) {
+      this.startDealerDraw();
+    } else {
+      this.deal(dealerSeat, rng);
+    }
+  }
+
+  // ── §4.1 抽牌決定莊家：每位玩家各自摸一張，先比權重再比顏色，平手者重抽 ──
+  private startDealerDraw() {
+    this.deck = shuffle(buildDeck(), this.rng); // 抽牌用牌堆（決定莊家後發牌會重洗）
+    this.dealerDraws = new Array(this.n).fill(null);
+    this.dealerContenders = this.players.map((p) => p.seat);
+    this.stage = 'DEAL_DRAW';
+    this.turnSeat = 0;
+    this.message = '抽牌決定莊家：請每位玩家各摸一張牌';
+  }
+
+  // 某玩家抽出決定莊家的牌；等所有競爭者都抽完才比較
+  private doDealerDraw(p: EnginePlayer): ApplyResult {
+    const card = this.deck.shift()!;
+    this.dealerDraws[p.seat] = card;
+    this.message = `${p.name} 抽到 ${card.color}${card.rank}`;
+    if (this.dealerContenders.some((s) => this.dealerDraws[s] == null)) {
+      return { ok: true }; // 還有競爭者沒抽，繼續等
+    }
+    this.resolveDealerDraw();
+    return { ok: true };
+  }
+
+  // 比較競爭者抽到的牌：唯一最大者當莊並發牌；平手者保留、重抽
+  private resolveDealerDraw() {
+    let best = -Infinity;
+    for (const s of this.dealerContenders) best = Math.max(best, cardDrawStrength(this.dealerDraws[s]!));
+    const tied = this.dealerContenders.filter((s) => cardDrawStrength(this.dealerDraws[s]!) === best);
+    if (tied.length === 1) {
+      const seat = tied[0];
+      const dc = this.dealerDraws[seat]!;
+      // 立即標記莊家，並停留展示 DEALER_REVEAL_MS 讓大家看清抽到的牌，時間到才發牌
+      this.dealerSeat = seat;
+      for (const p of this.players) p.isDealer = p.seat === seat;
+      this.dealerContenders = [seat];
+      this.dealerDecided = true;
+      this.dealerRevealEndsAt = Date.now() + DEALER_REVEAL_MS;
+      this.message = `${this.players[seat].name} 抽到 ${dc.color}${dc.rank}，當莊！`;
+      return;
+    }
+    // 平手：只保留平手者重抽，已淘汰者不必重抽（§4.1）
+    this.dealerContenders = tied;
+    for (const s of tied) this.dealerDraws[s] = null;
+    this.message = `平手（${tied.map((s) => this.players[s].name).join('、')}）→ 平手者重抽`;
+  }
+
+  // 展示時間結束 → 正式發牌開局（由 gameServer 於 dealerRevealEndsAt 後呼叫）
+  finalizeDealerDraw(): void {
+    if (this.stage !== 'DEAL_DRAW' || !this.dealerDecided || this.dealerSeat === null) return;
+    this.dealerDecided = false;
+    this.dealerRevealEndsAt = 0;
+    this.deal(this.dealerSeat, this.rng); // 重洗牌發牌（莊 10、其餘 9）；天胡則直接結算
+    if (this.phase !== 'FINISHED') {
+      this.message = `${this.players[this.dealerSeat].name} 當莊，開局（莊家先打）`;
+    }
   }
 
   // ── 發牌（§5）：莊家 10 張，其餘 9 張 ──────────────────
   private deal(dealerSeat: number, rng: () => number) {
+    this.dealerSeat = dealerSeat;
+    for (const p of this.players) p.isDealer = p.seat === dealerSeat;
     this.deck = shuffle(buildDeck(), rng);
     for (const p of this.players) {
       const count = p.seat === dealerSeat ? 10 : 9;
@@ -110,10 +207,11 @@ export class GameEngine {
     }
     this.turnSeat = dealerSeat;
     if (isWinningSet(this.ownedCards(this.players[dealerSeat]))) {
-      this.win(dealerSeat, '天胡');
+      this.win(dealerSeat, '天胡', {}); // 開手即胡，無胡牌張，全體付
     } else {
       this.stage = 'DISCARD'; // 莊家先打一張（不摸牌）
       this.message = `${this.players[dealerSeat].name} 開局（莊家先打）`;
+      this.refreshTenpai();
     }
   }
 
@@ -191,10 +289,15 @@ export class GameEngine {
   private formTentativeEat(seat: number) {
     const card = this.pending!.card;
     const p = this.players[seat];
-    const matchIdx = p.hand.findIndex((c) => isPair(c, card));
+    // 優先用死牌配對（讓死牌就地成對、解除死牌狀態，§7.2）
+    let matchIdx = p.hand.findIndex((c) => isPair(c, card) && p.deadIds.includes(c.id));
+    if (matchIdx < 0) matchIdx = p.hand.findIndex((c) => isPair(c, card));
     const [match] = p.hand.splice(matchIdx, 1);
+    const dIdx = p.deadIds.indexOf(match.id);
+    const matchWasDead = dIdx >= 0;
+    if (matchWasDead) p.deadIds.splice(dIdx, 1);
     p.melds.push([match, card]); // 暫定公開對子
-    this.tentative = { seat, meldIndex: p.melds.length - 1, match };
+    this.tentative = { seat, meldIndex: p.melds.length - 1, match, matchWasDead };
     this.eatHolder = seat;
     this.protectedSelfEat = false;
     this.turnSeat = seat; // 由吃牌者打一張（§7.3）
@@ -204,10 +307,11 @@ export class GameEngine {
 
   private undoTentativeEat() {
     if (!this.tentative) return;
-    const { seat, meldIndex, match } = this.tentative;
+    const { seat, meldIndex, match, matchWasDead } = this.tentative;
     const p = this.players[seat];
     p.melds.splice(meldIndex, 1); // 暫定對子一定是最後一個
     p.hand.push(match);
+    if (matchWasDead) p.deadIds.unshift(match.id); // 還原死牌狀態（放回 FIFO 前端）
     this.sortHand(p);
     this.tentative = null;
     this.eatHolder = null;
@@ -224,6 +328,11 @@ export class GameEngine {
   // ── 對外：某玩家此刻可做的動作 ─────────────────────────
   legalActionsFor(seat: number): ActionType[] {
     if (this.phase === 'FINISHED') return [];
+    if (this.stage === 'DEAL_DRAW') {
+      if (this.dealerDecided) return []; // 已決定莊家、展示中，任何人都不能再抽
+      // 決定莊家：仍在競爭且此輪尚未抽的玩家可以抽
+      return this.dealerContenders.includes(seat) && this.dealerDraws[seat] == null ? ['draw'] : [];
+    }
     if (this.stage === 'DRAW') {
       return seat === this.turnSeat ? ['draw'] : [];
     }
@@ -285,23 +394,32 @@ export class GameEngine {
     if (!this.legalActionsFor(p.seat).includes(action)) {
       return { ok: false, error: '現在無法執行此動作' };
     }
+    let res: ApplyResult;
     switch (action) {
       case 'draw':
-        return this.doDraw(p);
+        res = this.doDraw(p);
+        break;
       case 'discard':
-        return this.doDiscard(p, cardId);
+        res = this.doDiscard(p, cardId);
+        break;
       case 'eat':
-        return this.doEatClaim(p.seat);
+        res = this.doEatClaim(p.seat);
+        break;
       case 'declareWin':
-        return this.doDeclareWin(p);
+        res = this.doDeclareWin(p);
+        break;
       case 'pass':
-        return this.doPass(p);
+        res = this.doPass(p);
+        break;
       default:
         return { ok: false, error: '未知動作' };
     }
+    if (res.ok && !this.roundResult) this.refreshTenpai(); // 本局未結束才更新聽牌
+    return res;
   }
 
   private doDraw(p: EnginePlayer): ApplyResult {
+    if (this.stage === 'DEAL_DRAW') return this.doDealerDraw(p); // 決定莊家的抽牌（§4.1）
     // 下一家在兩秒後摸牌 → 關閉吃牌窗（沒按吃者當過牌），原牌落桌
     if (this.stage === 'CLAIM') {
       this.clearClaim();
@@ -312,7 +430,8 @@ export class GameEngine {
       this.drawGame = true;
       this.phase = 'FINISHED';
       this.winnerSeat = null;
-      this.message = '流局（牌堆已到底）';
+      this.message = '流局（牌堆剩九張，原莊連任）';
+      this.roundResult = this.buildDrawResult();
       return { ok: true };
     }
     const card = this.deck.shift()!;
@@ -324,9 +443,20 @@ export class GameEngine {
 
   // 打牌：莊家開局（DISCARD）或吃牌者出牌（EATING，提交吃牌）都走這裡
   private doDiscard(p: EnginePlayer, cardId?: string): ApplyResult {
+    // 死牌強制出牌（§7.3）：有死牌時必須打出死牌（先進先出，兩張且可聽牌時例外）
+    const forced = this.forcedDiscardIds(p);
+    if (forced && (!cardId || !forced.includes(cardId))) {
+      return { ok: false, error: '手上有死牌，必須先打出死牌' };
+    }
     const idx = p.hand.findIndex((c) => c.id === cardId);
     if (idx < 0) return { ok: false, error: '手牌中沒有這張牌' };
+    // 死牌形成（§7.2）：提交吃牌時，其他「能吃卻沒吃到」的玩家，其配對牌變死牌並公開
+    if (this.stage === 'EATING' && this.pending) {
+      this.formDeadCards(p.seat, this.pending.card, this.pending.fromSeat);
+    }
     const [card] = p.hand.splice(idx, 1);
+    const di = p.deadIds.indexOf(card.id);
+    if (di >= 0) p.deadIds.splice(di, 1); // 打出的是死牌 → 移出死牌佇列
     // 提交暫定吃牌（對子成為正式），清掉暫定狀態
     this.tentative = null;
     this.eatHolder = null;
@@ -334,6 +464,46 @@ export class GameEngine {
     this.message = `${p.name} 打出 ${card.color}${card.rank}`;
     this.startClaim(false); // 打出的牌只有其他玩家能吃/胡（放槍）
     return { ok: true };
+  }
+
+  // 出牌時允許打出的牌 id 清單（§7.3）；null = 無限制（可打任何手牌）
+  private forcedDiscardIds(p: EnginePlayer): string[] | null {
+    if (p.deadIds.length === 0) return null;
+    const allowed = new Set<string>([p.deadIds[0]]); // 先進先出：預設只能出最舊的死牌
+    // 例外：剛好兩張死牌，若改出另一張後進入聽牌 → 可自選（不用先進先出）
+    if (p.deadIds.length === 2) {
+      const other = p.deadIds[1];
+      const remaining = p.hand.filter((c) => c.id !== other);
+      if (isTenpai([...remaining, ...p.melds.flat()])) allowed.add(other);
+    }
+    return [...allowed];
+  }
+
+  // 提交吃牌時，替其他「能吃卻沒吃到」的玩家標記死牌（§7.2）
+  private formDeadCards(eaterSeat: number, eaten: Card, fromSeat: number) {
+    for (const other of this.players) {
+      if (other.seat === eaterSeat || other.seat === fromSeat) continue;
+      if (!hasMatch(other.hand, eaten)) continue; // 手上沒有可吃的配對就不成死牌
+      const idx = other.hand.findIndex(
+        (c) => isPair(c, eaten) && !other.deadIds.includes(c.id),
+      );
+      if (idx < 0) continue;
+      other.deadIds.push(other.hand[idx].id);
+      this.message =
+        (this.message ? this.message + '｜' : '') +
+        `${other.name} 的 ${eaten.color}${eaten.rank} 成死牌`;
+    }
+  }
+
+  // 重算各家聽牌狀態；新聽牌者宣告一次（§7）
+  private refreshTenpai() {
+    for (const p of this.players) {
+      const now = isTenpai(this.ownedCards(p));
+      if (now && !this.tenpai[p.seat]) {
+        this.message = (this.message ? this.message + '｜' : '') + `${p.name} 聽牌！`;
+      }
+      this.tenpai[p.seat] = now;
+    }
   }
 
   // 按吃：成為（或搶下）暫定吃牌者
@@ -356,16 +526,29 @@ export class GameEngine {
     if ((this.stage === 'CLAIM' || this.stage === 'EATING') && this.pending) {
       if (this.eatHolder !== null) this.undoTentativeEat(); // 胡牌優先，撤銷暫定吃
       const card = this.pending.card;
+      const kind = this.pending.kind;
+      const fromSeat = this.pending.fromSeat;
+      const handBefore = [...p.hand]; // 加入胡牌張前的暗手牌（胡開判定用）
       p.hand.push(card);
       this.sortHand(p);
-      const selfDraw = this.pending.kind === 'drawn' && p.seat === this.pending.fromSeat;
       this.pending = null;
       this.clearClaim();
-      this.win(p.seat, selfDraw ? '自摸' : '胡（放槍）');
+      if (kind === 'drawn') {
+        // 自摸或別人摸牌被胡：全體付、可抽五隻（§9.2/§11）
+        const selfDraw = p.seat === fromSeat;
+        this.win(p.seat, selfDraw ? '自摸' : '胡（摸牌）', {
+          winningCard: card,
+          loserSeat: null,
+          handBefore,
+        });
+      } else {
+        // 放槍：只有打牌者付、不能抽五隻
+        this.win(p.seat, '胡（放槍）', { winningCard: card, loserSeat: fromSeat, handBefore });
+      }
       return { ok: true };
     }
     if (this.stage === 'DISCARD' && isWinningSet(this.ownedCards(p))) {
-      this.win(p.seat, '胡');
+      this.win(p.seat, '胡', {}); // 開手胡，無胡牌張，全體付
       return { ok: true };
     }
     return { ok: false, error: '目前無法胡牌' };
@@ -401,13 +584,70 @@ export class GameEngine {
     this.stage = 'DRAW';
   }
 
-  private win(seat: number, reason: string) {
+  private win(seat: number, label: string, ctx: WinContext = {}) {
     this.winnerSeat = seat;
     this.phase = 'FINISHED';
     this.stage = 'DISCARD';
     this.pending = null;
     this.clearClaim();
-    this.message = `${this.players[seat].name} ${reason}胡牌！`;
+    this.message = `${this.players[seat].name} ${label}胡牌！`;
+    this.roundResult = this.buildWinResult(seat, label, ctx);
+  }
+
+  // 計分（§11 顏色 + §10.1 胡開 + §9.2 抽五隻）與付款分配
+  private buildWinResult(seat: number, label: string, ctx: WinContext): GameOverPayload {
+    const winner = this.players[seat];
+    const winningCard = ctx.winningCard ?? null;
+    const loserSeat = ctx.loserSeat ?? null;
+    const handBefore = ctx.handBefore ?? winner.hand;
+    const owned = this.ownedCards(winner);
+
+    const color = colorScore(owned);
+    const huKai = huKaiBonus(handBefore, winner.melds, winningCard);
+    // 抽五隻資格：自摸／摸牌胡（無放槍者）且有胡牌張；放槍不能抽（§9.2）
+    const eligible = loserSeat === null && winningCard !== null;
+    const df = eligible
+      ? drawFiveBonus(this.deck, winningCard)
+      : { cards: [] as Card[], qualifying: 0, heads: 0 };
+    const heads = color + huKai + df.heads;
+
+    // 付款：放槍只有放槍者付；自摸／摸牌胡則其餘全體各付一份（§11 勝負計算）
+    const payers =
+      loserSeat !== null
+        ? [loserSeat]
+        : this.players.filter((p) => p.seat !== seat).map((p) => p.seat);
+    const payments = this.players.map((p) => ({
+      seat: p.seat,
+      delta: p.seat === seat ? heads * payers.length : payers.includes(p.seat) ? -heads : 0,
+    }));
+
+    return {
+      winnerSeat: seat,
+      winnerName: winner.name,
+      reason: 'win',
+      category: label,
+      heads,
+      breakdown: { color, huKai, drawFive: df.heads },
+      drawFive: eligible ? { cards: df.cards, qualifying: df.qualifying } : null,
+      payments,
+      scores: [], // gameServer 補跨局累計
+      nextDealerSeat: seat, // 胡牌者下一局當莊（§4.2）
+    };
+  }
+
+  private buildDrawResult(): GameOverPayload {
+    return {
+      winnerSeat: null,
+      winnerName: null,
+      reason: 'draw',
+      category: '流局',
+      heads: 0,
+      breakdown: { color: 0, huKai: 0, drawFive: 0 },
+      drawFive: null,
+      payments: this.players.map((p) => ({ seat: p.seat, delta: 0 })),
+      scores: [],
+      nextDealerSeat: null, // gameServer：原莊連任（§4.2）
+    };
   }
 
   setConnected(playerId: string, connected: boolean) {
@@ -422,10 +662,15 @@ export class GameEngine {
       id: p.id,
       name: p.name,
       seat: p.seat,
-      handCount: p.hand.length,
+      handCount: p.hand.length - p.deadIds.length, // 死牌另外公開，不算暗牌
       melds: p.melds,
+      deadCards: p.deadIds
+        .map((id) => p.hand.find((c) => c.id === id))
+        .filter((c): c is Card => !!c),
       connected: p.connected,
       isDealer: p.isDealer,
+      isTenpai: this.tenpai[p.seat],
+      score: p.score,
     }));
     const lastDrawn =
       this.pending && this.pending.kind === 'drawn' && this.stage === 'CLAIM'
@@ -435,16 +680,26 @@ export class GameEngine {
       this.stage === 'CLAIM' && this.pending
         ? { card: this.pending.card, fromSeat: this.pending.fromSeat }
         : null;
+    // 決定莊家（§4.1）：把各座位抽到的牌與競爭者公開給前端顯示
+    const dealerDraw =
+      this.stage === 'DEAL_DRAW'
+        ? {
+            draws: this.players.map((p) => this.dealerDraws[p.seat] ?? null),
+            contenders: [...this.dealerContenders],
+            decidedSeat: this.dealerDecided ? this.dealerSeat : null, // 已定莊 → 展示中
+          }
+        : null;
     return {
       roomId: '',
       phase: this.phase,
       players: publicPlayers,
-      you: { id: me.id, seat: me.seat, hand: me.hand, melds: me.melds },
+      you: { id: me.id, seat: me.seat, hand: me.hand, melds: me.melds, deadIds: me.deadIds },
       deckCount: this.deck.length,
       discardPile: this.discardPile,
       currentTurnSeat: this.turnSeat,
       lastDrawn,
       pendingClaim,
+      dealerDraw,
       // 自摸保護時不限時 → 不送倒數（前端不顯示倒數條）
       claimEndsAt: this.stage === 'CLAIM' && !this.protectedSelfEat ? this.claimEndsAt : null,
       legalActions: this.legalActionsFor(me.seat),

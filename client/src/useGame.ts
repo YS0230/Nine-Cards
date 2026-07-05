@@ -78,6 +78,7 @@ export function useGame(): GameApi {
     socket.on(EVT.GAME_STATE, (state: PersonalGameState) => {
       setGame(state);
       setScreen('game');
+      if (state.phase !== 'FINISHED') setGameOver(null); // 下一局開始 → 收掉結算視窗
     });
     socket.on(EVT.GAME_OVER, (payload: GameOverPayload) => setGameOver(payload));
     socket.on(EVT.ERROR_MSG, (p: { message: string }) => setToast(p.message));
@@ -139,13 +140,14 @@ export function useGame(): GameApi {
     [identity],
   );
   const leave = useCallback(() => {
+    if (identity) socketRef.current?.emit(EVT.LEAVE, identity.playerId); // §13：離台結束整場
     localStorage.removeItem(LS_TOKEN);
     setIdentity(null);
     setRoom(null);
     setGame(null);
     setGameOver(null);
     setScreen('home');
-  }, []);
+  }, [identity]);
 
   const clearToast = useCallback(() => setToast(null), []);
 

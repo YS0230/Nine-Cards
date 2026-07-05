@@ -45,16 +45,10 @@ function pushState(room: Room) {
     state.roomId = room.id;
     io.to(p.socketId).emit(EVT.GAME_STATE, state);
   }
-  if (room.phase === 'FINISHED') {
-    const winnerSeat = engine.winnerSeat;
-    const winnerName = winnerSeat != null ? room.players[winnerSeat]?.name ?? null : null;
+  if (room.phase === 'FINISHED' && engine.roundResult) {
     for (const p of room.players) {
       if (p.connected && p.socketId) {
-        io.to(p.socketId).emit(EVT.GAME_OVER, {
-          winnerSeat,
-          winnerName,
-          reason: engine.drawGame ? 'draw' : 'win',
-        });
+        io.to(p.socketId).emit(EVT.GAME_OVER, engine.roundResult);
       }
     }
   }
@@ -119,6 +113,12 @@ io.on('connection', (socket) => {
     const r = game.action(playerId, req?.type, req?.cardId);
     if (!r.ok) emitError(socket.id, r.error);
     if (r.room) pushState(r.room);
+  });
+
+  socket.on(EVT.LEAVE, (playerId: string) => {
+    const room = game.leaveRoom(playerId);
+    if (room) pushState(room);
+    broadcastLobby();
   });
 
   socket.on('disconnect', () => {

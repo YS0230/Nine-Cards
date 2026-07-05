@@ -464,10 +464,25 @@ body {
   overflow: hidden; /* 全部縮寬塞滿一列，不出現內部橫捲軸 */
 }
 /* 每張暗手牌 = 一個等寬槽 */
-.hand-row > .card {
+.hand-row > .card,
+.hand-row > .dead-single {
   flex: 1 1 0;
   min-width: 0;
   max-width: 56px; /* 牌少時不會被拉寬到超過正常尺寸 */
+}
+/* 死牌單張：公開區中的一個等寬槽，內部牌填滿槽寬 */
+.hand-row > .dead-single {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.hand-row > .dead-single > .card {
+  width: 100%;
+}
+/* 依裝置寬度自動縮放：牌寬由 flex 決定，牌高依比例跟著縮，維持牌面比例不變形 */
+.hand-row .card {
+  height: auto;
+  aspect-ratio: 56 / 101;
 }
 /* 每組吃牌佔 1.5 槽（兩張各覆蓋一半），內部牌與手牌同寬 */
 .hand-row > .meld {
@@ -629,13 +644,149 @@ body {
 }
 .result {
   background: var(--felt-2);
-  padding: 32px 28px;
+  padding: 28px 24px;
   border-radius: 20px;
   text-align: center;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 14px;
   border: 2px solid var(--gold);
+  max-width: 92vw;
+}
+.result-cat {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--gold);
+}
+.result-breakdown {
+  font-size: 14px;
+  opacity: 0.9;
+}
+.result-drawfive {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: center;
+}
+.result-drawfive .rd-label {
+  font-size: 13px;
+  opacity: 0.8;
+}
+.result-drawfive .rd-cards {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.score-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 15px;
+}
+.score-table td {
+  padding: 6px 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  text-align: left;
+}
+.score-table td.up {
+  color: #7be07b;
+  text-align: right;
+}
+.score-table td.down {
+  color: #ff8a8a;
+  text-align: right;
+}
+.score-table td.score-total {
+  text-align: right;
+  font-weight: 700;
+}
+.result-next {
+  font-size: 14px;
+  opacity: 0.85;
+}
+
+/* ── 決定莊家（§4.1）抽牌面板 ─────────────────── */
+.dealer-draw .dd-hint {
+  font-size: 13px;
+  opacity: 0.75;
+}
+.dd-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+.dd-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 10px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.06);
+}
+.dd-row.out {
+  opacity: 0.45; /* 已淘汰（不必重抽） */
+}
+.dd-row.dealer {
+  background: rgba(232, 182, 12, 0.18);
+  outline: 2px solid var(--gold); /* 定莊者高亮 */
+}
+.dd-name {
+  flex: 1;
+  text-align: left;
+  font-weight: 600;
+}
+.dd-badge {
+  margin-left: 8px;
+  padding: 1px 8px;
+  border-radius: 8px;
+  background: var(--gold);
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 800;
+}
+.dd-placeholder {
+  width: 38px;
+  height: 68px;
+  border-radius: 5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  font-weight: 800;
+  color: rgba(255, 255, 255, 0.5);
+  border: 2px dashed rgba(255, 255, 255, 0.3);
+}
+.dd-msg {
+  font-size: 14px;
+  color: var(--gold);
+  font-weight: 700;
+}
+.dd-wait {
+  font-size: 14px;
+  opacity: 0.75;
+}
+.opp-score {
+  margin-left: 6px;
+  font-size: 12px;
+  opacity: 0.75;
+}
+.tenpai-badge {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: var(--gold);
+  color: #1c1400;
+  font-size: 12px;
+  font-weight: 700;
+}
+/* 死牌：公開區中的「單張未成對」牌（無金框對子＝死牌，§7.2）；不再用文字標註 */
+.dead-single {
+  display: inline-flex;
+  align-items: center;
+}
+.opp-melds .dead-single {
+  flex: 0 0 auto;
 }
 .toast {
   position: fixed;
