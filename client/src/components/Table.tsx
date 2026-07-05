@@ -27,6 +27,12 @@ export function Table({ api }: { api: GameApi }) {
     .map((id) => g.you.hand.find((c) => c.id === id))
     .filter((c): c is CardT => !!c);
   const myHandCards = g.you.hand.filter((c) => !deadIdSet.has(c.id));
+  // 此刻真正可打出的死牌（伺服器算好的先進先出結果；兩張死牌且例外成立時可能有兩張）
+  const forcedIds = g.you.forcedDiscardIds;
+  const forcedCards = forcedIds
+    ? myDeadCards.filter((c) => forcedIds.includes(c.id))
+    : [];
+  const forcedNames = forcedCards.map((c) => `${c.color}${c.rank}`).join('、');
   const canDiscard = g.legalActions.includes('discard');
   const canDraw = g.legalActions.includes('draw');
   const canEat = g.legalActions.includes('eat');
@@ -133,7 +139,9 @@ export function Table({ api }: { api: GameApi }) {
             : '輪到你，請摸牌'
           : canDiscard
             ? hasDead
-              ? '手上有死牌，需先打出死牌'
+              ? forcedCards.length > 1
+                ? `手上有死牌，可任選一張打出：${forcedNames}`
+                : `手上有死牌，需先打出「${forcedNames}」（死牌先進先出）`
               : selected
                 ? '按「打出」送出這張牌'
                 : '點選一張要打出的牌'
@@ -227,17 +235,26 @@ export function Table({ api }: { api: GameApi }) {
               ))}
             </div>
           ))}
-          {/* 死牌：公開區中的單張（未成對即為死牌，§7.2），有死牌時即為可打出的牌 */}
-          {myDeadCards.map((card) => (
-            <div className="dead-single" key={card.id}>
-              <Card
-                card={card}
-                selectable={canDiscard}
-                selected={selected === card.id}
-                onClick={canDiscard ? () => setSelected(card.id) : undefined}
-              />
-            </div>
-          ))}
+          {/* 死牌：公開區中的單張（未成對即為死牌，§7.2）。
+              先進先出：只有伺服器判定「此刻可打出」的那張（forcedDiscardIds）才能選，
+              其餘死牌先鎖住，避免玩家選錯順序卻收到看不出原因的錯誤訊息 */}
+          {myDeadCards.map((card) => {
+            const isForced = forcedIds?.includes(card.id) ?? false;
+            const pickable = canDiscard && isForced;
+            return (
+              <div className={`dead-single ${hasDead && !isForced ? 'locked' : ''}`} key={card.id}>
+                <Card
+                  card={card}
+                  selectable={pickable}
+                  selected={selected === card.id}
+                  onClick={pickable ? () => setSelected(card.id) : undefined}
+                />
+                {hasDead && isForced && forcedCards.length < myDeadCards.length && (
+                  <span className="dead-next-badge">先出</span>
+                )}
+              </div>
+            );
+          })}
           {(g.you.melds.length > 0 || myDeadCards.length > 0) && (
             <div className="hand-divider" aria-hidden="true" />
           )}

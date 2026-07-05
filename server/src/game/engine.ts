@@ -520,7 +520,19 @@ export class GameEngine {
     // 死牌強制出牌（§7.3）：有死牌時必須打出死牌（先進先出，兩張且可聽牌時例外）
     const forced = this.forcedDiscardIds(p);
     if (forced && (!cardId || !forced.includes(cardId))) {
-      return { ok: false, error: '手上有死牌，必須先打出死牌' };
+      // 明確點名「哪一張」才符合先進先出，避免玩家誤以為死牌可任選一張打出
+      const names = forced
+        .map((id) => p.hand.find((c) => c.id === id))
+        .filter((c): c is Card => !!c)
+        .map((c) => `${c.color}${c.rank}`)
+        .join('、');
+      return {
+        ok: false,
+        error:
+          forced.length > 1
+            ? `手上有死牌，需先打出其中一張：${names}`
+            : `手上有死牌，需先打出「${names}」（死牌先進先出）`,
+      };
     }
     const idx = p.hand.findIndex((c) => c.id === cardId);
     if (idx < 0) return { ok: false, error: '手牌中沒有這張牌' };
@@ -889,7 +901,14 @@ export class GameEngine {
       roomId: '',
       phase: this.phase,
       players: publicPlayers,
-      you: { id: me.id, seat: me.seat, hand: me.hand, melds: me.melds, deadIds: me.deadIds },
+      you: {
+        id: me.id,
+        seat: me.seat,
+        hand: me.hand,
+        melds: me.melds,
+        deadIds: me.deadIds,
+        forcedDiscardIds: this.forcedDiscardIds(me),
+      },
       deckCount: this.deck.length,
       discardPile: this.discardPile,
       currentTurnSeat: this.turnSeat,

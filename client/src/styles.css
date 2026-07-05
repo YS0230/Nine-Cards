@@ -907,11 +907,29 @@ body {
 }
 /* 死牌：公開區中的「單張未成對」牌（無金框對子＝死牌，§7.2）；不再用文字標註 */
 .dead-single {
+  position: relative;
   display: inline-flex;
   align-items: center;
 }
 .opp-melds .dead-single {
   flex: 0 0 auto;
+}
+/* 尚未輪到先進先出的死牌：淡化，避免玩家誤選順序不對的那張 */
+.dead-single.locked {
+  opacity: 0.45;
+}
+/* 標記「此刻先進先出、應優先打出」的死牌 */
+.dead-next-badge {
+  position: absolute;
+  top: -8px;
+  left: -4px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: var(--gold);
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
 }
 .toast {
   position: fixed;

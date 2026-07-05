@@ -55,6 +55,9 @@ export interface SelfView {
   hand: Card[]; // 只有自己看得到暗手牌（含死牌，死牌另由 deadIds 標示）
   melds: Card[][];
   deadIds: string[]; // 我的死牌（在 hand 中的 id，FIFO 順序）；出牌時須先出（§7.3）
+  // 此刻真正可以打出的死牌 id（先進先出；兩張死牌且打另一張可聽牌時例外，§7.3）；
+  // 無死牌為 null。前端據此鎖定「哪一張」可選，而非籠統鎖住整個手牌。
+  forcedDiscardIds: string[] | null;
 }
 
 // ── 胡牌後手動抽五隻（§9.2）：由胡牌者一張一張抽，符合條件者標記加頭 ──

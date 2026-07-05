@@ -77,7 +77,7 @@ describe('死牌形成與強制出牌（§7.2/7.3）', () => {
     expect(pub2.handCount).toBe(2); // 死牌不算暗牌張數
   });
 
-  it('有死牌時，必須先打出死牌（先進先出）', () => {
+  it('有死牌時，必須先打出死牌（先進先出）；錯誤訊息需點名正確的那張', () => {
     const eng = new GameEngine(seats3, 0);
     eng.phase = 'PLAYING';
     eng.stage = 'DISCARD';
@@ -90,15 +90,29 @@ describe('死牌形成與強制出牌（§7.2/7.3）', () => {
     ];
     // 兩張死牌：黃帥（front）、紅仕
     eng.players[0].deadIds = [c('黃', '帥').id, c('紅', '仕').id];
-    // 打非死牌 → 被拒
+    // 打非死牌 → 被拒，且訊息點名唯一該打的那張（先進先出＝黃帥）
     const bad = eng.apply('0', 'discard', c('綠', '將').id);
     expect(bad.ok).toBe(false);
+    expect(bad.error).toContain('黃帥');
+    expect(bad.error).not.toContain('紅仕'); // 不該點名尚未輪到的死牌
+    // 誤打「另一張死牌」（順序不對）也要被拒，且同樣點名正確的黃帥
+    const wrongOrder = eng.apply('0', 'discard', c('紅', '仕').id);
+    expect(wrongOrder.ok).toBe(false);
+    expect(wrongOrder.error).toContain('黃帥');
+    // viewFor 需帶出「此刻真正可打」的死牌 id，供前端只解鎖正確那張
+    expect(eng.viewFor('0').you.forcedDiscardIds).toEqual([c('黃', '帥').id]);
     // 打先進先出的死牌 → 允許
     const ok = eng.apply('0', 'discard', c('黃', '帥').id);
     expect(ok.ok).toBe(true);
   });
 
-  it('兩張死牌、改出另一張後聽牌 → 可不照先進先出', () => {
+  it('沒有死牌時 forcedDiscardIds 為 null（不限制）', () => {
+    const eng = new GameEngine(seats3, 0);
+    eng.players[0].deadIds = [];
+    expect(eng.viewFor('0').you.forcedDiscardIds).toBeNull();
+  });
+
+  it('兩張死牌、改出另一張後聽牌 → 可不照先進先出，且兩張皆列為可選', () => {
     const eng = new GameEngine(seats3, 0);
     eng.phase = 'PLAYING';
     eng.stage = 'DISCARD';
@@ -114,6 +128,9 @@ describe('死牌形成與強制出牌（§7.2/7.3）', () => {
       c('黃', '仕'), // 死牌 second
     ];
     eng.players[0].deadIds = [c('黃', '帥').id, c('黃', '仕').id];
+    // 例外成立：兩張死牌皆可選，前端據此才不會鎖住第二張
+    const forced = eng.viewFor('0').you.forcedDiscardIds!;
+    expect(new Set(forced)).toEqual(new Set([c('黃', '帥').id, c('黃', '仕').id]));
     // 打第二張死牌（非 front）→ 因打完聽牌，允許
     const r = eng.apply('0', 'discard', c('黃', '仕').id);
     expect(r.ok).toBe(true);
