@@ -83,11 +83,15 @@ the turn advances). Key rules encoded in `engine.ts` — preserve them when edit
   env override) AND no one has claimed**; drawing then closes the window (unclaimed card → discard).
   A server timer (`GameServer.scheduleClaim`) only re-pushes state at the window end to enable that
   draw button — it does **not** auto-resolve.
-- **Self-draw protection (`protectedSelfEat`)**: if the drawer can eat/hu their own drawn card and
-  no *other* player can hu it, the window is unlimited (`claimEndsAt = MAX_SAFE_INTEGER`), the next
-  player is blocked from drawing, and only the drawer acts — either `eat`, or `pass` (decline →
-  discard the drawn card). `pass` is a legal action *only* in this case (there is deliberately no
-  general "pass" button in the UI).
+- **Self-draw protection (`protectedSelfEat`)**: if the drawer can **hu** their own drawn card
+  (highest priority — even when other players are also waiting on that same card), or can **eat**
+  it while no *other* player can hu it, the window is unlimited (`claimEndsAt = MAX_SAFE_INTEGER`),
+  the next player is blocked from drawing, and only the drawer acts — `declareWin`, `eat`, or
+  `pass` (decline → remaining claimers get a timed window; if none, the drawn card is discarded).
+  `pass` is a legal action *only* in this case (there is deliberately no general "pass" button in
+  the UI).
+- During `EATING`, `viewFor` exposes `eating: { seat, card }` so every client shows who ate which
+  card while the eater picks a discard.
 
 ## Conventions
 
