@@ -13,6 +13,7 @@ export function Table({ api }: { api: GameApi }) {
   const me = g.players.find((p) => p.seat === mySeat);
   const myScore = me?.score ?? 0;
   const myTenpai = me?.isTenpai ?? false;
+  const myXianggong = me?.isXianggong ?? false; // 相公：本局僅能觀看
   const deadIdSet = new Set(g.you.deadIds); // 我的死牌 id（出牌時須先出，§7.3）
   const hasDead = deadIdSet.size > 0;
   // 死牌移到公開區顯示（依 FIFO 順序）；暗手牌只留非死牌
@@ -99,7 +100,9 @@ export function Table({ api }: { api: GameApi }) {
     if (window.confirm('確定要離開這場遊戲嗎？')) api.leave();
   };
 
-  const prompt = canWin
+  const prompt = myXianggong
+    ? '你已相公（逾時未吃），本局僅能觀看'
+    : canWin
     ? '你可以胡牌！'
     : canPass
       ? '自摸！可吃請按「吃」，不吃就點中央那張打出'
@@ -122,7 +125,10 @@ export function Table({ api }: { api: GameApi }) {
       <header className="table-top">
         <span className="chip">房 {api.room?.code ?? g.roomId.slice(0, 4)}</span>
         <span className="chip">牌堆 {g.deckCount}</span>
-        <span className="chip">我 {myScore} 頭{myTenpai && ' · 聽'}</span>
+        <span className="chip">
+          我 {myScore} 頭{myTenpai && ' · 聽'}
+          {myXianggong && <span className="xg-badge">相公</span>}
+        </span>
         <span className={`chip turn ${myTurn ? 'me' : ''}`}>
           {myTurn ? '輪到你' : `輪到 ${turnName}`}
         </span>
@@ -498,7 +504,8 @@ function RoundResult({
       : players.map((p) => ({ seat: p.seat, total: p.score }));
 
   return (
-    <div className="overlay">
+    // result-overlay：面板靠上顯示，避免擋住下方手牌
+    <div className="overlay result-overlay">
       <div className="result">
         <h2>
           {result.reason === 'draw' ? '流局（原莊連任）' : `${result.winnerName ?? ''} 胡牌！`}
@@ -508,7 +515,10 @@ function RoundResult({
           <>
             <div className="result-cat">{result.category}｜共 {result.heads} 頭</div>
             <div className="result-breakdown">
-              顏色 {result.breakdown.color}
+              {result.breakdown.color === 0
+                ? '四色 → 0 頭（不加頭、不抽五隻）'
+                : `顏色 ${result.breakdown.color}`}
+              {result.breakdown.selfDraw > 0 && ` ＋ 自摸 ${result.breakdown.selfDraw}`}
               {result.breakdown.huKai > 0 && ` ＋ 胡開 ${result.breakdown.huKai}`}
               {result.breakdown.drawFive > 0 && ` ＋ 抽五隻 ${result.breakdown.drawFive}`}
             </div>
@@ -532,9 +542,21 @@ function RoundResult({
           <tbody>
             {rows.map((s) => {
               const d = deltaOf(s.seat);
+              const pl = players.find((p) => p.seat === s.seat);
+              const ready = continueReady.includes(s.seat);
               return (
                 <tr key={s.seat}>
                   <td>{nameOf(s.seat)}</td>
+                  {/* 標記誰按了「繼續」，一眼看出還在等誰 */}
+                  <td className="ready-cell">
+                    {pl && !pl.connected ? (
+                      <span className="ready-no">斷線</span>
+                    ) : ready ? (
+                      <span className="ready-yes">✓ 已準備</span>
+                    ) : (
+                      <span className="ready-no">等待中…</span>
+                    )}
+                  </td>
                   <td className={d > 0 ? 'up' : d < 0 ? 'down' : ''}>
                     {d > 0 ? `+${d}` : d}
                   </td>
@@ -601,6 +623,7 @@ function OpponentSeat({ p, active }: { p: PublicPlayer; active: boolean }) {
         {p.isDealer && '👑 '}
         {p.name}
         {p.isTenpai && <span className="tenpai-badge">聽</span>}
+        {p.isXianggong && <span className="xg-badge">相公</span>}
         <span className="opp-score">{p.score} 頭</span>
         {!p.connected && ' 📴'}
       </div>

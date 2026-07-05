@@ -713,10 +713,33 @@ body {
   opacity: 0.85;
 }
 
-/* 結算：繼續 / 離開（§13 全員按繼續才開下一局） */
+/* 結算面板靠上顯示，避免擋住下方手牌 */
+.result-overlay {
+  align-items: flex-start;
+  padding-top: max(16px, 5vh);
+  background: rgba(0, 0, 0, 0.55);
+}
+.result-overlay .result {
+  max-height: 72vh;
+  overflow-y: auto;
+}
+
+/* 結算：繼續 / 離開（§13 全員按繼續才開下一局）＋ 各家準備狀態標記 */
 .result-ready {
   font-size: 13px;
   opacity: 0.8;
+}
+.score-table td.ready-cell {
+  font-size: 12px;
+  text-align: center;
+  white-space: nowrap;
+}
+.ready-yes {
+  color: #7be07b;
+  font-weight: 700;
+}
+.ready-no {
+  opacity: 0.55;
 }
 .result-actions {
   display: flex;
@@ -866,6 +889,16 @@ body {
   border-radius: 8px;
   background: var(--gold);
   color: #1c1400;
+  font-size: 12px;
+  font-weight: 700;
+}
+/* 相公標記：逾時未吃 → 本局僅能觀看 */
+.xg-badge {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: rgba(200, 55, 55, 0.9);
+  color: #ffecec;
   font-size: 12px;
   font-weight: 700;
 }

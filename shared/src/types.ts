@@ -42,6 +42,7 @@ export interface PublicPlayer {
   connected: boolean;
   isDealer: boolean;
   isTenpai: boolean; // 是否聽牌（§7）
+  isXianggong: boolean; // 相公：吃牌優先權最高卻逾時未吃 → 本局僅能觀看
   score: number; // 本場累計頭數（跨局；由 gameServer 維護）
 }
 
@@ -119,7 +120,8 @@ export interface GameOverPayload {
   reason: 'win' | 'draw';
   category: string; // 胡牌方式標籤（自摸／放槍…）；流局為空
   heads: number; // 贏家每位付家收取的頭數
-  breakdown: { color: number; huKai: number; drawFive: number };
+  // selfDraw＝自摸加一頭；四色（color 0）時整體 0 頭、其他加頭皆不計
+  breakdown: { color: number; huKai: number; selfDraw: number; drawFive: number };
   // 抽五隻揭示（不符資格為 null）：marks[i]＝該張是否符合加頭（§9.2）
   drawFive: { cards: Card[]; qualifying: number; marks: boolean[] } | null;
   payments: PaymentEntry[]; // 本局各座位頭數變化

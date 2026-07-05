@@ -363,3 +363,68 @@ describe('自摸最高優先（多家聽同一張牌）', () => {
     expect(eng.winnerSeat).toBe(2);
   });
 });
+
+// 架設「seat1 打出 黃帥、seat0 可吃（優先權最高）、吃牌窗已逾時」的情境
+function timeoutSetup() {
+  const eng = new GameEngine(
+    [
+      { id: '0', name: 'P0' },
+      { id: '1', name: 'P1' },
+      { id: '2', name: 'P2' },
+    ],
+    0,
+  );
+  eng.phase = 'PLAYING';
+  eng.stage = 'CLAIM';
+  eng.pending = { card: c('黃', '帥', 1), fromSeat: 1, kind: 'discard' };
+  eng.claimOrder = [0]; // seat0 可吃、優先權最高
+  eng.claimId = 1;
+  eng.claimEndsAt = Date.now() - 1; // 已逾時 → 下家（seat2）可摸牌
+  eng.players[0].hand = [c('黃', '帥', 2), c('綠', '士')];
+  eng.players[1].hand = [c('綠', '將')];
+  eng.players[2].hand = [c('白', '卒')];
+  eng.deck = Array.from({ length: 30 }, (_, i) => c('紅', '兵', i + 1));
+  eng.discardPile = [];
+  return eng;
+}
+
+describe('相公（吃牌優先權最高卻逾時未吃 → 本局僅能觀看）', () => {
+  it('下家摸牌關窗 → 優先權最高者成相公、不能再做任何動作', () => {
+    const eng = timeoutSetup();
+    const r = eng.apply('2', 'draw'); // seat2 摸牌 → 關閉吃牌窗
+    expect(r.ok).toBe(true);
+    expect(eng.xianggong[0]).toBe(true); // seat0 逾時未吃 → 相公
+    expect(eng.legalActionsFor(0)).toEqual([]); // 僅能觀看
+    expect(eng.apply('0', 'eat').ok).toBe(false);
+  });
+
+  it('相公被跳過：輪替不會輪到相公摸牌', () => {
+    const eng = timeoutSetup();
+    eng.apply('2', 'draw'); // seat0 成相公；seat2 摸出紅兵（無人可吃 → 直接落桌）
+    expect(eng.stage).toBe('DRAW');
+    expect(eng.turnSeat).toBe(1); // 跳過相公 seat0，輪到 seat1
+  });
+
+  it('相公不會再被列入吃牌窗（打出可吃的牌也不開窗）', () => {
+    const eng = timeoutSetup();
+    eng.apply('2', 'draw'); // seat0 成相公（手上仍有黃帥可配對）
+    // 改由 seat1 出牌：打出黃帥 → 只有相公 seat0 有配對，仍不開吃牌窗，直接落桌
+    eng.stage = 'DISCARD';
+    eng.turnSeat = 1;
+    eng.players[1].hand = [c('黃', '帥', 3), c('綠', '將')];
+    const r = eng.apply('1', 'discard', '黃_帥_3');
+    expect(r.ok).toBe(true);
+    expect(eng.stage).toBe('DRAW'); // 無人可吃 → 直接換下一位
+    expect(eng.turnSeat).toBe(2);
+  });
+
+  it('下家自己就是最高優先者 → 主動摸牌不算相公', () => {
+    const eng = timeoutSetup();
+    eng.claimOrder = [2]; // 下家 seat2 自己可吃
+    eng.players[2].hand = [c('黃', '帥', 2), c('白', '卒')];
+    eng.players[0].hand = [c('綠', '士')];
+    const r = eng.apply('2', 'draw'); // 選擇摸牌放棄吃
+    expect(r.ok).toBe(true);
+    expect(eng.xianggong[2]).toBe(false); // 主動放棄，不是逾時
+  });
+});

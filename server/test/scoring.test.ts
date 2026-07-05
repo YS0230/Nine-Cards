@@ -144,12 +144,46 @@ describe('付款分配', () => {
     expect(rr.drawFive).not.toBeNull();
     expect(rr.drawFive!.marks).toEqual([true, true, false, false, false]); // 前兩張黃帥加頭
     expect(rr.breakdown.color).toBe(5);
+    expect(rr.breakdown.selfDraw).toBe(1); // 自摸加一頭
     expect(rr.breakdown.drawFive).toBe(2); // 命中兩張黃帥
-    expect(rr.heads).toBe(7);
+    expect(rr.heads).toBe(8); // 5（一色）＋1（自摸）＋2（抽五隻）
     const bySeat = Object.fromEntries(rr.payments.map((p) => [p.seat, p.delta]));
-    expect(bySeat[1]).toBe(14); // 兩位付家各 7
-    expect(bySeat[0]).toBe(-7);
-    expect(bySeat[2]).toBe(-7);
+    expect(bySeat[1]).toBe(16); // 兩位付家各 8
+    expect(bySeat[0]).toBe(-8);
+    expect(bySeat[2]).toBe(-8);
+  });
+
+  it('他人摸牌被胡（非自摸）→ 不加自摸頭', () => {
+    // fromSeat=0 摸牌、seat1 胡 → 全體付、可抽五隻，但無自摸加頭
+    const eng = claimWin('drawn', 0, [c('紅', '兵'), c('紅', '兵', 2), c('紅', '兵', 3), c('紅', '兵', 4), c('紅', '兵', 5)]);
+    expect(eng.apply('1', 'declareWin').ok).toBe(true);
+    for (let i = 0; i < 5; i++) expect(eng.apply('1', 'drawFive').ok).toBe(true);
+    const rr = eng.roundResult!;
+    expect(rr.category).toBe('胡（摸牌）');
+    expect(rr.breakdown.selfDraw).toBe(0);
+    expect(rr.heads).toBe(5); // 只有一色 5
+  });
+
+  it('四色胡牌 → 直接 0 頭：不加自摸/胡開頭、也不抽五隻', () => {
+    const eng = claimWin('drawn', 1, [c('黃', '帥', 3), c('黃', '帥', 4)]);
+    // 手牌改為四種顏色的四對＋黃帥單張（配 pending 黃帥成第五對）
+    eng.players[1].hand = [
+      c('黃', '帥', 2),
+      c('紅', '仕'), c('紅', '仕', 2),
+      c('綠', '將'), c('綠', '將', 2),
+      c('白', '卒'), c('白', '卒', 2),
+      c('黃', '兵'), c('黃', '兵', 2),
+    ];
+    expect(eng.apply('1', 'declareWin').ok).toBe(true);
+    // 不進抽五隻，直接結算
+    expect(eng.stage).not.toBe('DRAW_FIVE');
+    const rr = eng.roundResult!;
+    expect(rr.heads).toBe(0);
+    expect(rr.breakdown).toEqual({ color: 0, huKai: 0, selfDraw: 0, drawFive: 0 });
+    expect(rr.drawFive).toBeNull();
+    expect(rr.payments.every((p) => p.delta === 0)).toBe(true);
+    expect(rr.winnerSeat).toBe(1); // 仍算胡牌（下一局當莊）
+    expect(rr.nextDealerSeat).toBe(1);
   });
 
   it('抽五隻最後一張命中 → 加兩頭（手動抽）', () => {
