@@ -1,0 +1,652 @@
+:root {
+  --felt: #0b3d2e;
+  --felt-2: #0e4d39;
+  --gold: #e8b60c;
+  --ink: #14231c;
+  --paper: #f6f3ea;
+  --accent: #e0621a;
+  --ok: #2fbf71;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: -apple-system, 'PingFang TC', 'Noto Sans TC', system-ui, sans-serif;
+  background: radial-gradient(circle at 50% 20%, var(--felt-2), var(--felt));
+  color: var(--paper);
+  overscroll-behavior: none;
+}
+
+.app {
+  height: 100%;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom)
+    env(safe-area-inset-left);
+}
+
+.conn-banner {
+  background: var(--accent);
+  text-align: center;
+  padding: 6px;
+  font-size: 14px;
+}
+
+/* ── Buttons & fields ─────────────────────────── */
+.btn {
+  appearance: none;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--paper);
+  font-size: 17px;
+  font-weight: 600;
+  padding: 14px 18px;
+  border-radius: 14px;
+  cursor: pointer;
+  transition: transform 0.05s ease, background 0.15s ease;
+}
+.btn:active {
+  transform: scale(0.97);
+}
+.btn:disabled {
+  opacity: 0.4;
+}
+.btn.primary {
+  background: var(--gold);
+  color: var(--ink);
+  border-color: transparent;
+}
+.btn.win {
+  background: var(--accent);
+  border-color: transparent;
+}
+.btn.ghost {
+  background: transparent;
+}
+.btn.small {
+  font-size: 14px;
+  padding: 8px 12px;
+  border-radius: 10px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 14px;
+  width: 100%;
+  max-width: 320px;
+}
+.field input {
+  font-size: 18px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(0, 0, 0, 0.25);
+  color: var(--paper);
+}
+
+/* ── Lobby ────────────────────────────────────── */
+.lobby,
+.waiting {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 24px;
+  text-align: center;
+}
+.title {
+  font-size: 44px;
+  margin: 24px 0 0;
+  color: var(--gold);
+  letter-spacing: 6px;
+}
+.subtitle {
+  margin: 0;
+  opacity: 0.75;
+}
+.menu {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  max-width: 320px;
+}
+.hint {
+  opacity: 0.6;
+  font-size: 13px;
+  margin-top: auto;
+}
+
+/* ── 公開大廳清單 ─────────────────────────────── */
+.browse {
+  width: 100%;
+  max-width: 360px;
+}
+.browse-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 14px;
+  opacity: 0.85;
+  margin-bottom: 4px;
+}
+.room-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.room-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.07);
+}
+.room-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  text-align: left;
+  min-width: 0;
+}
+.room-code {
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: var(--gold);
+}
+.room-host {
+  font-size: 12px;
+  opacity: 0.7;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.room-count {
+  font-size: 13px;
+  opacity: 0.8;
+}
+
+/* ── Waiting room ─────────────────────────────── */
+.waiting .back {
+  align-self: flex-start;
+}
+.seat-list {
+  list-style: none;
+  padding: 0;
+  width: 100%;
+  max-width: 340px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.seat {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.06);
+}
+.seat.empty {
+  opacity: 0.45;
+  border: 1px dashed rgba(255, 255, 255, 0.25);
+}
+.seat-no {
+  font-size: 12px;
+  opacity: 0.6;
+}
+.seat-name {
+  flex: 1;
+  text-align: left;
+  font-weight: 600;
+}
+.dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+.dot.on {
+  background: var(--ok);
+}
+.dot.off {
+  background: #888;
+}
+
+/* ── Table ────────────────────────────────────── */
+.table {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  position: relative; /* 供翻牌動畫層定位 */
+}
+.table-top {
+  display: flex;
+  gap: 8px;
+  padding: 8px 10px;
+  flex-wrap: wrap;
+  flex: 0 0 auto;
+}
+.chip {
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 13px;
+}
+.chip.turn.me {
+  background: var(--gold);
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.opponents {
+  display: flex;
+  gap: 10px;
+  padding: 6px 10px;
+  overflow-x: auto;
+  flex: 0 0 auto;
+  max-height: 28vh;
+}
+.opp {
+  background: rgba(0, 0, 0, 0.22);
+  border-radius: 12px;
+  padding: 8px;
+  min-width: 120px;
+  border: 2px solid transparent;
+}
+.opp.active {
+  border-color: var(--gold);
+}
+.opp-head {
+  font-size: 13px;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+/* 對手的吃牌 + 分隔線 + 暗牌，同一列 */
+.opp-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: nowrap;
+  max-width: 180px;
+  overflow-x: auto; /* 牌多時此列自己橫捲，不換行 */
+}
+.opp-hand {
+  display: flex;
+  gap: 0;
+  flex-wrap: nowrap;
+  flex: 0 0 auto;
+  padding-left: 9px; /* 補回第一張的負邊距，對齊左緣 */
+}
+.opp-hand .card {
+  width: 18px;
+  height: 32px;
+  border-radius: 3px;
+  margin-left: -9px; /* 水平覆蓋前一張的一半 */
+}
+.opp-melds .card {
+  width: 24px;
+  height: 43px;
+}
+.opp-melds {
+  display: flex;
+  gap: 6px;
+  flex-wrap: nowrap;
+  flex: 0 0 auto;
+}
+.opp-divider {
+  flex: 0 0 auto;
+  align-self: stretch;
+  width: 2px;
+  margin: 3px 0;
+  border-radius: 2px;
+  background: repeating-linear-gradient(
+    to bottom,
+    rgba(232, 182, 12, 0.7) 0 5px,
+    transparent 5px 10px
+  ); /* 金色虛線分隔吃牌與暗牌 */
+}
+.meld {
+  --ov: 19px; /* 水平覆蓋量：card-sm 寬 38px 的一半 → 成對的牌只露出一半 */
+  display: flex;
+  gap: 0;
+  padding: 2px;
+  padding-left: calc(2px + var(--ov)); /* 補回第一張的負邊距，讓它仍貼齊金框 */
+  background: rgba(232, 182, 12, 0.18);
+  border-radius: 6px;
+}
+.meld > .card {
+  margin-left: calc(-1 * var(--ov));
+}
+.opp-melds .meld {
+  --ov: 12px; /* 對手 meld 的牌寬 24px，覆蓋量取一半 */
+}
+
+.center {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  overflow-y: auto; /* 桌面內容多時內部捲動，不推擠其他區塊 */
+}
+.table-felt {
+  flex: 1;
+  min-height: 0;
+  background: rgba(0, 0, 0, 0.22);
+  border-radius: 14px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.deck-badge {
+  align-self: flex-start;
+  background: rgba(0, 0, 0, 0.35);
+  border-radius: 999px;
+  padding: 5px 12px;
+  font-size: 13px;
+}
+.discard-wrap {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.discard-label {
+  font-size: 12px;
+  opacity: 0.6;
+}
+.discard-pile {
+  --ov: 19px; /* 棄牌水平覆蓋量：card-sm 寬 38px 的一半 → 每張只露出一半 */
+  display: flex;
+  gap: 0;
+  row-gap: 4px;
+  flex-wrap: wrap;
+  padding-left: var(--ov); /* 補回每列第一張的負邊距，對齊左緣 */
+  align-content: flex-start;
+  overflow-y: auto;
+  min-height: 0;
+}
+.discard-pile > .card {
+  margin-left: calc(-1 * var(--ov)); /* 後一張覆蓋前一張右半，只露出一半 */
+}
+.empty-hint {
+  opacity: 0.45;
+  font-size: 13px;
+}
+.current-offer {
+  align-self: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  background: rgba(232, 182, 12, 0.16);
+  border: 2px solid var(--gold);
+  border-radius: 12px;
+}
+.co-label {
+  font-size: 12px;
+  color: var(--gold);
+  font-weight: 700;
+}
+.current-offer.selfeat {
+  border-color: var(--ok);
+  background: rgba(47, 191, 113, 0.16);
+}
+.co-hint {
+  font-size: 11px;
+  opacity: 0.85;
+}
+.countdown {
+  width: 96px;
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+.countdown-fill {
+  height: 100%;
+  background: var(--gold);
+}
+.msg {
+  flex: 0 0 auto;
+  align-self: center;
+  font-size: 13px;
+  opacity: 0.85;
+  background: rgba(0, 0, 0, 0.35);
+  padding: 5px 12px;
+  border-radius: 999px;
+}
+
+.me {
+  flex: 0 0 auto;
+  background: rgba(0, 0, 0, 0.32);
+  border-radius: 16px 16px 0 0;
+  padding: 8px 10px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+/* 吃牌 + 分隔線 + 暗手牌，同一列、同尺寸共用空間、不橫卷 */
+.hand-row {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-height: 116px; /* 固定高度（容納半高牌 101px + 內距），避免吃牌出現時位移 */
+  padding: 6px 2px;
+  overflow: hidden; /* 全部縮寬塞滿一列，不出現內部橫捲軸 */
+}
+/* 每張暗手牌 = 一個等寬槽 */
+.hand-row > .card {
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 56px; /* 牌少時不會被拉寬到超過正常尺寸 */
+}
+/* 每組吃牌佔 1.5 槽（兩張各覆蓋一半），內部牌與手牌同寬 */
+.hand-row > .meld {
+  flex: 1.5 1.5 0;
+  min-width: 0;
+  max-width: 84px; /* = 1.5 × 56，內部牌上限與手牌一致 */
+  padding: 0; /* 覆蓋改用百分比，不需 padding 補償 */
+}
+.hand-row > .meld > .card {
+  flex: 0 0 66.6667%; /* 兩張各佔 meld 的 2/3 寬 → 與手牌槽同寬 */
+  min-width: 0;
+  max-width: none;
+  margin-left: 0;
+  border-radius: 7px;
+}
+.hand-row > .meld > .card + .card {
+  margin-left: -33.3333%; /* 水平覆蓋前一張的一半 */
+}
+.hand-divider {
+  flex: 0 0 auto;
+  align-self: stretch;
+  width: 2px;
+  margin: 10px 2px;
+  border-radius: 2px;
+  background: repeating-linear-gradient(
+    to bottom,
+    rgba(232, 182, 12, 0.7) 0 6px,
+    transparent 6px 12px
+  ); /* 金色虛線分隔吃牌與暗牌 */
+}
+.prompt {
+  min-height: 20px;
+  text-align: center;
+  font-size: 13px;
+  opacity: 0.85;
+}
+.actions {
+  display: flex;
+  gap: 6px;
+  padding-top: 6px;
+}
+.actions .act {
+  flex: 1;
+  min-width: 0;
+  padding: 12px 4px;
+  font-size: 15px;
+  border-radius: 12px;
+}
+
+/* ── Cards ────────────────────────────────────── */
+/* 原始牌面比例約 68.6×247（1:3.6）；牌框高度 = 寬度×1.8 ＝ 原始牌一半高度，
+   搭配 img 的 object-position:top 只顯示原圖上半部（正立的字），不變形。 */
+.card {
+  width: 56px;
+  height: 101px;
+  border-radius: 7px;
+  background: var(--paper);
+  overflow: hidden;
+  flex: 0 0 auto;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  user-select: none;
+}
+.card img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top center; /* 對齊原圖上緣，顯示上半部 */
+  display: block;
+}
+.card-sm {
+  width: 38px;
+  height: 68px;
+  border-radius: 5px;
+}
+.card-big {
+  width: 108px;
+  height: 194px;
+  border-radius: 10px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.6);
+}
+.card-back {
+  background: repeating-linear-gradient(45deg, #7a1f1f, #7a1f1f 6px, #9c2a2a 6px, #9c2a2a 12px);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+}
+.card-fallback {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 26px;
+  font-weight: 800;
+  color: var(--ink);
+}
+.card-selectable {
+  cursor: pointer;
+  transition: transform 0.08s ease;
+}
+.card-selectable:active {
+  transform: translateY(-6px);
+}
+.card-selected {
+  transform: translateY(-14px);
+  outline: 3px solid var(--gold);
+}
+
+/* ── 翻牌動畫（摸牌/出牌先在主畫面跳一下）─────── */
+.reveal-layer {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 15;
+  background: radial-gradient(circle at center, rgba(0, 0, 0, 0.4), transparent 55%);
+}
+.reveal {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  animation: reveal-pop 1.1s ease forwards;
+}
+.reveal-label {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--gold);
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.8);
+}
+@keyframes reveal-pop {
+  0% {
+    transform: scale(0.3) translateY(10px);
+    opacity: 0;
+  }
+  22% {
+    transform: scale(1.12) translateY(0);
+    opacity: 1;
+  }
+  72% {
+    transform: scale(1.05);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(0.85) translateY(-14px);
+    opacity: 0;
+  }
+}
+
+/* ── Overlay / Toast ──────────────────────────── */
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 20;
+}
+.result {
+  background: var(--felt-2);
+  padding: 32px 28px;
+  border-radius: 20px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  border: 2px solid var(--gold);
+}
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.85);
+  color: #fff;
+  padding: 12px 20px;
+  border-radius: 12px;
+  font-size: 15px;
+  z-index: 30;
+  max-width: 90%;
+}
