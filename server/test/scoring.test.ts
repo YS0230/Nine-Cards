@@ -129,6 +129,9 @@ describe('付款分配', () => {
     expect(bySeat[1]).toBe(5); // 贏家收 1 位付家 × 5
     expect(bySeat[0]).toBe(-5); // 放槍者付
     expect(bySeat[2]).toBe(0); // 其他人不付
+    // 放槍不是自摸 → 前端不該播自摸音效
+    expect(eng.winnerSelfDraw).toBe(false);
+    expect(eng.viewFor('1').winnerSelfDraw).toBe(false);
   });
 
   it('自摸：全體付、可抽五隻（胡牌者手動一張一張抽）', () => {
@@ -138,6 +141,9 @@ describe('付款分配', () => {
     // 胡牌後進入手動抽五隻，尚未結算
     expect(eng.stage).toBe('DRAW_FIVE');
     expect(eng.roundResult).toBeNull();
+    // winnerSeat 一確定就同步標記自摸（跟胡牌當下播音效的時機一致，不必等抽五隻結算）
+    expect(eng.winnerSelfDraw).toBe(true);
+    expect(eng.viewFor('1').winnerSelfDraw).toBe(true);
     // 只有胡牌者能抽；他家不能
     expect(eng.apply('2', 'drawFive').ok).toBe(false);
     // 胡牌者一張一張抽，抽滿五張才結算
@@ -168,6 +174,7 @@ describe('付款分配', () => {
     expect(rr.category).toBe('胡（摸牌）');
     expect(rr.breakdown.selfDraw).toBe(0);
     expect(rr.heads).toBe(5); // 只有一色 5
+    expect(eng.winnerSelfDraw).toBe(false); // 別人摸牌被胡，不是自摸 → 不播自摸音效
   });
 
   it('四色胡牌 → 直接 0 頭：不加自摸/胡開頭、也不抽五隻', () => {
@@ -190,6 +197,19 @@ describe('付款分配', () => {
     expect(rr.payments.every((p) => p.delta === 0)).toBe(true);
     expect(rr.winnerSeat).toBe(1); // 仍算胡牌（下一局當莊）
     expect(rr.nextDealerSeat).toBe(1);
+  });
+
+  it('開手胡（含天胡走同一路徑）：無 selfDraw 情境 → winnerSelfDraw 維持 false', () => {
+    const eng = new GameEngine(seats3, 0);
+    eng.phase = 'PLAYING';
+    eng.stage = 'DISCARD';
+    eng.turnSeat = 0;
+    eng.roundResult = null;
+    eng.players[0].hand = yellowNine().concat(c('黃', '帥', 1)); // 湊滿五對，開手即胡
+    const r = eng.apply('0', 'declareWin');
+    expect(r.ok).toBe(true);
+    expect(eng.winnerSelfDraw).toBe(false);
+    expect(eng.viewFor('0').winnerSelfDraw).toBe(false);
   });
 
   it('抽五隻最後一張命中 → 加兩頭（手動抽）', () => {

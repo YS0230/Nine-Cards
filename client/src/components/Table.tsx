@@ -66,6 +66,10 @@ export function Table({ api }: { api: GameApi }) {
   // 音效觸發判斷用：上一次的贏家／各座位聽牌狀態（useRef 初值＝進場當下，避免重連時補播）
   const prevWinner = useRef(g.winnerSeat);
   const prevTenpai = useRef(new Map(g.players.map((p) => [p.seat, p.isTenpai])));
+  // 上一次全桌死牌 id 快照：用來判斷新出現在棄牌區的牌「原本是不是死牌」（打出死牌要額外提示音）
+  const prevDeadIds = useRef(
+    new Set<string>([...g.you.deadIds, ...g.players.flatMap((p) => p.deadCards.map((c) => c.id))]),
+  );
 
   useEffect(() => {
     // ── 報牌語音：牌第一次公開（摸出／打出）時唸出「顏色＋牌名」，同一張只報一次 ──
@@ -79,18 +83,31 @@ export function Table({ api }: { api: GameApi }) {
     if (g.pendingClaim) announce(g.pendingClaim.card); // 打出待吃的牌（摸出的同張已去重）
     for (const c of g.discardPile.slice(prevDiscardLen.current)) announce(c); // 無人可吃直接落桌
 
-    // ── 動作音效：吃／聽／胡（與報牌共用播放佇列，依序不疊音）──
-    if (g.winnerSeat != null && prevWinner.current == null) void playEffect('win');
+    // ── 動作音效：吃／聽／胡（自摸另用專屬音效）／打出死牌（與報牌共用播放佇列，依序不疊音）──
+    if (g.winnerSeat != null && prevWinner.current == null) {
+      void playEffect(g.winnerSelfDraw ? 'selfDrawWin' : 'win');
+    }
     prevWinner.current = g.winnerSeat;
     for (const p of g.players) {
       if (p.isTenpai && !prevTenpai.current.get(p.seat)) void playEffect('tenpai'); // 新聽牌
       prevTenpai.current.set(p.seat, p.isTenpai);
     }
+    // 死牌先進先出（§7.3）：新落入棄牌區的牌，若打出前就是死牌 → 額外播放提示音
+    for (const c of g.discardPile.slice(prevDiscardLen.current)) {
+      if (prevDeadIds.current.has(c.id)) void playEffect('deadCard');
+    }
+    prevDeadIds.current = new Set([
+      ...g.you.deadIds,
+      ...g.players.flatMap((p) => p.deadCards.map((c) => c.id)),
+    ]);
     let card: CardT | null = null;
     let label = '翻牌';
     // 吃牌（含被更高優先者搶吃）以「座位+牌」為鍵，換人吃同一張也會再跳一次
     const eatKey = g.eating ? `${g.eating.seat}:${g.eating.card.id}` : null;
-    if (eatKey && eatKey !== prevEatKey.current) void playEffect('eat'); // 含被高優先者搶吃
+    if (eatKey && eatKey !== prevEatKey.current) {
+      // 死牌就地湊對（§7.2）→ 播「撿」；一般吃牌（含被高優先者搶吃）→ 播「吃」
+      void playEffect(g.eating!.matchedDeadCard ? 'pickupDead' : 'eat');
+    }
     if (g.lastDrawn && g.lastDrawn.card.id !== prevDrawnId.current) {
       card = g.lastDrawn.card;
       label = `${g.players.find((p) => p.seat === g.lastDrawn!.seat)?.name ?? ''} 摸到`;

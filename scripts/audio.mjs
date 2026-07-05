@@ -29,6 +29,9 @@ const FILES = {
   吃: 'chi',
   聽: 'ting',
   胡: 'hu',
+  死牌: 'sipai',
+  自摸: 'zimo',
+  撿: 'jian',
 };
 
 await mkdir(OUT, { recursive: true });

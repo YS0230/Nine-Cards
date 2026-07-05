@@ -122,6 +122,7 @@ export class GameEngine {
   pending: Pending | null = null;
   phase: RoomPhase = 'PLAYING';
   winnerSeat: number | null = null;
+  winnerSelfDraw = false; // 本局是否為自摸胡牌（供前端在胡牌當下挑選對應音效）
   drawGame = false;
   message: string | null = null;
   roundResult: GameOverPayload | null = null; // 一局結束的結算（scores/nextDealerSeat 由 gameServer 補）
@@ -684,6 +685,7 @@ export class GameEngine {
 
   private win(seat: number, label: string, ctx: WinContext = {}) {
     this.winnerSeat = seat;
+    this.winnerSelfDraw = !!ctx.selfDraw;
     this.pending = null;
     this.clearClaim();
     const winner = this.players[seat];
@@ -870,7 +872,11 @@ export class GameEngine {
     // 有人暫定吃牌：公開「誰吃了哪張」讓所有玩家看到（待吃牌者打出才定案）
     const eating =
       this.stage === 'EATING' && this.eatHolder !== null && this.pending
-        ? { seat: this.eatHolder, card: this.pending.card }
+        ? {
+            seat: this.eatHolder,
+            card: this.pending.card,
+            matchedDeadCard: this.tentative?.matchWasDead ?? false,
+          }
         : null;
     // 胡牌後手動抽五隻（§9.2）：把已抽出的牌（含加頭標記）公開給前端顯示
     const drawFive: DrawFiveView | null =
@@ -926,6 +932,7 @@ export class GameEngine {
       legalActions: this.legalActionsFor(me.seat),
       hints: this.hints,
       winnerSeat: this.winnerSeat,
+      winnerSelfDraw: this.winnerSelfDraw,
       message: this.message,
     };
   }

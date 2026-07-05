@@ -77,6 +77,43 @@ describe('死牌形成與強制出牌（§7.2/7.3）', () => {
     expect(pub2.handCount).toBe(2); // 死牌不算暗牌張數
   });
 
+  it('吃牌時：一般手牌配對 → eating.matchedDeadCard 為 false（前端播「吃」）', () => {
+    const eng = new GameEngine(seats3, 0);
+    eng.phase = 'PLAYING';
+    eng.stage = 'CLAIM';
+    eng.pending = { card: c('黃', '帥', 9), fromSeat: 0, kind: 'discard' };
+    eng.turnSeat = 0;
+    eng.claimOrder = [1];
+    eng.eatHolder = null;
+    eng.tentative = null;
+    eng.claimId = 1;
+    eng.claimEndsAt = Date.now() + 999_999;
+    eng.players[1].hand = [c('黃', '帥', 1), c('綠', '將')]; // 一般手牌，非死牌
+    eng.players[1].deadIds = [];
+
+    expect(eng.apply('1', 'eat').ok).toBe(true);
+    expect(eng.viewFor('1').eating).toEqual({ seat: 1, card: c('黃', '帥', 9), matchedDeadCard: false });
+  });
+
+  it('吃牌時：用手中死牌就地湊對（§7.2）→ eating.matchedDeadCard 為 true（前端播「撿」），且死牌狀態解除', () => {
+    const eng = new GameEngine(seats3, 0);
+    eng.phase = 'PLAYING';
+    eng.stage = 'CLAIM';
+    eng.pending = { card: c('黃', '帥', 9), fromSeat: 0, kind: 'discard' };
+    eng.turnSeat = 0;
+    eng.claimOrder = [1];
+    eng.eatHolder = null;
+    eng.tentative = null;
+    eng.claimId = 1;
+    eng.claimEndsAt = Date.now() + 999_999;
+    eng.players[1].hand = [c('黃', '帥', 1), c('綠', '將')];
+    eng.players[1].deadIds = [c('黃', '帥', 1).id]; // 黃帥是死牌，等待配對
+
+    expect(eng.apply('1', 'eat').ok).toBe(true);
+    expect(eng.viewFor('1').eating).toEqual({ seat: 1, card: c('黃', '帥', 9), matchedDeadCard: true });
+    expect(eng.players[1].deadIds).toHaveLength(0); // 就地成對，解除死牌狀態
+  });
+
   it('有死牌時，必須先打出死牌（先進先出）；錯誤訊息需點名正確的那張', () => {
     const eng = new GameEngine(seats3, 0);
     eng.phase = 'PLAYING';

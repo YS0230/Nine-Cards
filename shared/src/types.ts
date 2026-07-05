@@ -89,7 +89,8 @@ export interface PersonalGameState {
   lastDrawn: { seat: number; card: Card } | null; // 剛摸出並公開的牌（§6.1）
   pendingClaim: { card: Card; fromSeat: number } | null; // 正在等待吃/過的牌
   // 有人暫定吃牌（EATING）：誰吃了哪張，待其打出（期間高優先者仍可搶）；非此階段為 null
-  eating: { seat: number; card: Card } | null;
+  // matchedDeadCard＝配對用的是手上原本的死牌（§7.2 死牌就地成對）→ 前端改播「撿」而非「吃」音效
+  eating: { seat: number; card: Card; matchedDeadCard: boolean } | null;
   // 決定莊家（§4.1）：開局各玩家自己抽牌，draws 依座位索引（null＝尚未抽），
   // contenders＝仍在競爭的座位，decidedSeat＝已定莊並展示中的座位（null＝尚未定莊）；
   // 非此階段為 null
@@ -107,6 +108,7 @@ export interface PersonalGameState {
   legalActions: ActionType[]; // 伺服器告訴你此刻可做的動作
   hints: boolean; // 新手提示：開＝依 legalActions 鎖定吃/胡按鈕；關＝按鈕不鎖、由伺服器判定
   winnerSeat: number | null;
+  winnerSelfDraw: boolean; // 本局是否為自摸胡牌（前端據此在胡牌當下挑選「胡」或「自摸」音效）
   message: string | null;
 }
 
