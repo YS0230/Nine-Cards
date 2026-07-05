@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { GameApi } from '../useGame.js';
 import { Card } from './Card.js';
+import { playCardVoice, playEffect } from '../sound.js';
 import type { PublicPlayer, Card as CardT, GameOverPayload, DrawFiveView } from '@nine-cards/shared';
 
 export function Table({ api }: { api: GameApi }) {
@@ -35,12 +36,36 @@ export function Table({ api }: { api: GameApi }) {
   const prevEatKey = useRef<string | null>(null);
   const prevDiscardLen = useRef(g.discardPile.length);
   const timer = useRef<number | undefined>(undefined);
+  // 已報過牌名的牌 id（牌 id 每局重複使用，換局時清空重計）
+  const announced = useRef(new Set<string>());
+  // 音效觸發判斷用：上一次的贏家／各座位聽牌狀態（useRef 初值＝進場當下，避免重連時補播）
+  const prevWinner = useRef(g.winnerSeat);
+  const prevTenpai = useRef(new Map(g.players.map((p) => [p.seat, p.isTenpai])));
 
   useEffect(() => {
+    // ── 報牌語音：牌第一次公開（摸出／打出）時唸出「顏色＋牌名」，同一張只報一次 ──
+    if (g.discardPile.length < prevDiscardLen.current) announced.current.clear(); // 新的一局
+    const announce = (c: CardT) => {
+      if (announced.current.has(c.id)) return;
+      announced.current.add(c.id);
+      void playCardVoice(c);
+    };
+    if (g.lastDrawn) announce(g.lastDrawn.card);
+    if (g.pendingClaim) announce(g.pendingClaim.card); // 打出待吃的牌（摸出的同張已去重）
+    for (const c of g.discardPile.slice(prevDiscardLen.current)) announce(c); // 無人可吃直接落桌
+
+    // ── 動作音效：吃／聽／胡（與報牌共用播放佇列，依序不疊音）──
+    if (g.winnerSeat != null && prevWinner.current == null) void playEffect('win');
+    prevWinner.current = g.winnerSeat;
+    for (const p of g.players) {
+      if (p.isTenpai && !prevTenpai.current.get(p.seat)) void playEffect('tenpai'); // 新聽牌
+      prevTenpai.current.set(p.seat, p.isTenpai);
+    }
     let card: CardT | null = null;
     let label = '翻牌';
     // 吃牌（含被更高優先者搶吃）以「座位+牌」為鍵，換人吃同一張也會再跳一次
     const eatKey = g.eating ? `${g.eating.seat}:${g.eating.card.id}` : null;
+    if (eatKey && eatKey !== prevEatKey.current) void playEffect('eat'); // 含被高優先者搶吃
     if (g.lastDrawn && g.lastDrawn.card.id !== prevDrawnId.current) {
       card = g.lastDrawn.card;
       label = `${g.players.find((p) => p.seat === g.lastDrawn!.seat)?.name ?? ''} 摸到`;
