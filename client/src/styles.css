@@ -1058,3 +1058,62 @@ body {
   background: rgba(0, 0, 0, 0.25);
   color: var(--paper);
 }
+
+/* ── 3D 牌桌（three.js）──────────────────────────────── */
+.scene3d-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  position: relative;
+  margin: 8px;
+  border-radius: 14px;
+  overflow: hidden;
+  /* 場景背景（renderer 透明）：暗色包廂氛圍 */
+  background: radial-gradient(120% 90% at 50% 30%, #143528 0%, #0b1f17 70%, #06120d 100%);
+}
+.scene3d {
+  position: absolute;
+  inset: 0;
+}
+.scene3d canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: manipulation; /* 快速點按不觸發雙擊縮放 */
+}
+/* 待吃牌／吃牌中：文字說明與倒數條疊在場景上緣 */
+.s3-offer {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: calc(100% - 24px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 12px;
+  background: rgba(20, 12, 0, 0.72);
+  border: 1.5px solid var(--gold);
+  border-radius: 10px;
+  pointer-events: none;
+}
+.s3-offer.selfeat {
+  border-color: var(--ok);
+}
+.s3-offer.selfeat .co-label {
+  color: var(--ok);
+}
+.s3-offer.eaten {
+  border-color: var(--accent);
+}
+.s3-offer.eaten .co-label {
+  color: var(--accent);
+}
+.s3-msg {
+  position: absolute;
+  left: 50%;
+  bottom: 8px;
+  transform: translateX(-50%);
+  max-width: calc(100% - 24px);
+  pointer-events: none;
+}

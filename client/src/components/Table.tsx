@@ -1,12 +1,23 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { GameApi } from '../useGame.js';
 import { Card } from './Card.js';
+import { Scene3D } from '../three/Scene3D.js';
 import { playCardVoice, playEffect } from '../sound.js';
 import type { PublicPlayer, Card as CardT, GameOverPayload, DrawFiveView } from '@nine-cards/shared';
+
+const LS_VIEW3D = 'nineCards.view3d';
 
 export function Table({ api }: { api: GameApi }) {
   const g = api.game!;
   const [selected, setSelected] = useState<string | null>(null);
+  // 3D 牌桌（three.js）／傳統 2D 版面切換，記住玩家選擇
+  const [view3d, setView3d] = useState(() => localStorage.getItem(LS_VIEW3D) !== '0');
+  const toggleView = () => {
+    setView3d((v) => {
+      localStorage.setItem(LS_VIEW3D, v ? '0' : '1');
+      return !v;
+    });
+  };
 
   const mySeat = g.you.seat;
   const seatCount = g.players.length;
@@ -54,6 +65,19 @@ export function Table({ api }: { api: GameApi }) {
   // 新手提示關閉：吃/胡按鈕不自動鎖定（相公、對局結束除外），按下後由伺服器判定
   const eatEnabled = g.hints ? canEat : !myXianggong && g.phase === 'PLAYING';
   const winEnabled = g.hints ? canWin : !myXianggong && g.phase === 'PLAYING';
+
+  // 3D 場景：此刻可點選的牌 id（規則與 2D 相同：有死牌只能點強制打出的那張）
+  const pickableIds = useMemo(() => {
+    const ids = new Set<string>();
+    if (!canDiscard) return ids;
+    if (hasDead) {
+      for (const id of forcedIds ?? []) ids.add(id);
+    } else {
+      for (const c of myHandCards) ids.add(c.id);
+    }
+    return ids;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [g]);
 
   // ── 摸牌/出牌時：先在主畫面「翻牌」跳一下，再落入桌面 ──
   const [reveal, setReveal] = useState<{ card: CardT; label: string } | null>(null);
@@ -178,117 +202,162 @@ export function Table({ api }: { api: GameApi }) {
         <span className={`chip turn ${myTurn ? 'me' : ''}`}>
           {myTurn ? '輪到你' : `輪到 ${turnName}`}
         </span>
+        <button className="chip" onClick={toggleView}>
+          {view3d ? '2D' : '3D'}
+        </button>
         <button className="chip leave-chip" onClick={onLeaveClick}>
           離開
         </button>
       </header>
 
-      <section className="opponents">
-        {opponents.map((p) => (
-          <OpponentSeat
-            key={p.id}
-            p={p}
-            relation={relationOf(p.seat)}
-            active={p.seat === g.currentTurnSeat}
+      {view3d ? (
+        /* 3D 牌桌（three.js）：手牌/對手/棄牌/牌堆全在場景內，點牌選牌 */
+        <section className="scene3d-wrap">
+          <Scene3D
+            g={g}
+            selectedId={selected}
+            pickableIds={pickableIds}
+            canPass={canPass}
+            onPick={setSelected}
+            onPass={() => api.act('pass')}
           />
-        ))}
-      </section>
-
-      {/* 桌面：牌堆 + 待吃的牌 + 棄牌區（一直顯示，不被覆蓋） */}
-      <section className="center">
-        <div className="table-felt">
-          <div className="deck-badge">牌堆 {g.deckCount}</div>
-
-          {/* 待決定的牌一直放在桌面中央，直到有人吃或時間到落入棄牌 */}
+          {/* 待吃牌／吃牌中：文字說明與倒數條用 DOM 疊在場景上方 */}
           {g.pendingClaim && (
-            <div className={`current-offer ${canPass ? 'selfeat' : ''}`}>
+            <div className={`s3-offer ${canPass ? 'selfeat' : ''}`}>
               <div className="co-label">
                 {canPass
-                  ? '你自摸這張（不限時）'
+                  ? '你自摸這張（不限時）：不吃 → 點中央那張打出'
                   : `${g.players.find((p) => p.seat === g.pendingClaim!.fromSeat)?.name} 的這張，可吃／胡`}
               </div>
-              <Card
-                card={g.pendingClaim.card}
-                selectable={canPass}
-                onClick={canPass ? () => api.act('pass') : undefined}
-              />
-              {canPass && <div className="co-hint">不吃 → 點這張打出</div>}
               {g.claimEndsAt && <CountdownBar endsAt={g.claimEndsAt} total={g.claimWindowMs} />}
             </div>
           )}
-
-          {/* 有人吃牌：公開顯示誰吃了哪張（待其打出定案；期間高優先者仍可搶） */}
-          {g.eating && (
-            <div className="current-offer eaten">
-              <div className="co-label">{nameOf(g.eating.seat)} 吃了這張</div>
-              <Card card={g.eating.card} />
-              <div className="co-hint">
+          {!g.pendingClaim && g.eating && (
+            <div className="s3-offer eaten">
+              <div className="co-label">
+                {nameOf(g.eating.seat)} 吃了這張，
                 {g.eating.seat === mySeat ? '請打出一張牌' : `等待 ${nameOf(g.eating.seat)} 出牌…`}
               </div>
             </div>
           )}
+          {g.message && <div className="msg s3-msg">{g.message}</div>}
+        </section>
+      ) : (
+        <>
+          <section className="opponents">
+            {opponents.map((p) => (
+              <OpponentSeat
+                key={p.id}
+                p={p}
+                relation={relationOf(p.seat)}
+                active={p.seat === g.currentTurnSeat}
+              />
+            ))}
+          </section>
 
-          <div className="discard-wrap">
-            <div className="discard-label">桌面棄牌</div>
-            <div className="discard-pile">
-              {g.discardPile.length === 0 && <span className="empty-hint">（尚無棄牌）</span>}
-              {g.discardPile.map((card, i) => (
-                <Card key={card.id + i} card={card} small />
-              ))}
+          {/* 桌面：牌堆 + 待吃的牌 + 棄牌區（一直顯示，不被覆蓋） */}
+          <section className="center">
+            <div className="table-felt">
+              <div className="deck-badge">牌堆 {g.deckCount}</div>
+
+              {/* 待決定的牌一直放在桌面中央，直到有人吃或時間到落入棄牌 */}
+              {g.pendingClaim && (
+                <div className={`current-offer ${canPass ? 'selfeat' : ''}`}>
+                  <div className="co-label">
+                    {canPass
+                      ? '你自摸這張（不限時）'
+                      : `${g.players.find((p) => p.seat === g.pendingClaim!.fromSeat)?.name} 的這張，可吃／胡`}
+                  </div>
+                  <Card
+                    card={g.pendingClaim.card}
+                    selectable={canPass}
+                    onClick={canPass ? () => api.act('pass') : undefined}
+                  />
+                  {canPass && <div className="co-hint">不吃 → 點這張打出</div>}
+                  {g.claimEndsAt && <CountdownBar endsAt={g.claimEndsAt} total={g.claimWindowMs} />}
+                </div>
+              )}
+
+              {/* 有人吃牌：公開顯示誰吃了哪張（待其打出定案；期間高優先者仍可搶） */}
+              {g.eating && (
+                <div className="current-offer eaten">
+                  <div className="co-label">{nameOf(g.eating.seat)} 吃了這張</div>
+                  <Card card={g.eating.card} />
+                  <div className="co-hint">
+                    {g.eating.seat === mySeat ? '請打出一張牌' : `等待 ${nameOf(g.eating.seat)} 出牌…`}
+                  </div>
+                </div>
+              )}
+
+              <div className="discard-wrap">
+                <div className="discard-label">桌面棄牌</div>
+                <div className="discard-pile">
+                  {g.discardPile.length === 0 && <span className="empty-hint">（尚無棄牌）</span>}
+                  {g.discardPile.map((card, i) => (
+                    <Card key={card.id + i} card={card} small />
+                  ))}
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
-        {g.message && <div className="msg">{g.message}</div>}
-      </section>
+            {g.message && <div className="msg">{g.message}</div>}
+          </section>
+        </>
+      )}
 
       {/* 我的區域：固定高度，melds 保留空間、動作列固定不跳動 */}
       <section className="me">
-        {/* 公開區（吃牌對子＋死牌單張）｜分隔線｜暗手牌，同一列、同尺寸、依寬度自動縮放 */}
-        <div className="hand-row" aria-label="我的公開區與手牌">
-          {g.you.melds.map((pair, i) => (
-            <div className="meld" key={`m${i}`}>
-              {pair.map((card) => (
-                <Card key={card.id} card={card} />
-              ))}
-            </div>
-          ))}
-          {/* 死牌：公開區中的單張（未成對即為死牌，§7.2）。
-              先進先出：只有伺服器判定「此刻可打出」的那張（forcedDiscardIds）才能選，
-              其餘死牌先鎖住，避免玩家選錯順序卻收到看不出原因的錯誤訊息 */}
-          {myDeadCards.map((card) => {
-            const isForced = forcedIds?.includes(card.id) ?? false;
-            const pickable = canDiscard && isForced;
-            return (
-              <div className={`dead-single ${hasDead && !isForced ? 'locked' : ''}`} key={card.id}>
+        {/* 公開區（吃牌對子＋死牌單張）｜分隔線｜暗手牌，同一列、同尺寸、依寬度自動縮放
+            （3D 模式下手牌畫在場景裡，這一列不顯示） */}
+        {!view3d && (
+          <div className="hand-row" aria-label="我的公開區與手牌">
+            {g.you.melds.map((pair, i) => (
+              <div className="meld" key={`m${i}`}>
+                {pair.map((card) => (
+                  <Card key={card.id} card={card} />
+                ))}
+              </div>
+            ))}
+            {/* 死牌：公開區中的單張（未成對即為死牌，§7.2）。
+                先進先出：只有伺服器判定「此刻可打出」的那張（forcedDiscardIds）才能選，
+                其餘死牌先鎖住，避免玩家選錯順序卻收到看不出原因的錯誤訊息 */}
+            {myDeadCards.map((card) => {
+              const isForced = forcedIds?.includes(card.id) ?? false;
+              const pickable = canDiscard && isForced;
+              return (
+                <div
+                  className={`dead-single ${hasDead && !isForced ? 'locked' : ''}`}
+                  key={card.id}
+                >
+                  <Card
+                    card={card}
+                    selectable={pickable}
+                    selected={selected === card.id}
+                    onClick={pickable ? () => setSelected(card.id) : undefined}
+                  />
+                  {hasDead && isForced && forcedCards.length < myDeadCards.length && (
+                    <span className="dead-next-badge">先出</span>
+                  )}
+                </div>
+              );
+            })}
+            {(g.you.melds.length > 0 || myDeadCards.length > 0) && (
+              <div className="hand-divider" aria-hidden="true" />
+            )}
+            {myHandCards.map((card) => {
+              // 有死牌時只能打死牌（先進先出／聽牌例外由伺服器把關，§7.3）
+              const pickable = canDiscard && !hasDead;
+              return (
                 <Card
+                  key={card.id}
                   card={card}
                   selectable={pickable}
                   selected={selected === card.id}
                   onClick={pickable ? () => setSelected(card.id) : undefined}
                 />
-                {hasDead && isForced && forcedCards.length < myDeadCards.length && (
-                  <span className="dead-next-badge">先出</span>
-                )}
-              </div>
-            );
-          })}
-          {(g.you.melds.length > 0 || myDeadCards.length > 0) && (
-            <div className="hand-divider" aria-hidden="true" />
-          )}
-          {myHandCards.map((card) => {
-            // 有死牌時只能打死牌（先進先出／聽牌例外由伺服器把關，§7.3）
-            const pickable = canDiscard && !hasDead;
-            return (
-              <Card
-                key={card.id}
-                card={card}
-                selectable={pickable}
-                selected={selected === card.id}
-                onClick={pickable ? () => setSelected(card.id) : undefined}
-              />
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        )}
 
         <div className="prompt">{prompt}</div>
 
