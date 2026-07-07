@@ -2,6 +2,7 @@
 // 每次 sync() 重新計算所有牌的目標位置/朝向，render loop 以插值平滑移動。
 // 點選（raycast）只回報「哪張牌被點了」，合法性仍完全交給伺服器判定。
 import * as THREE from 'three';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import {
   cardImageBase,
   type Card as CardT,
@@ -131,6 +132,8 @@ export class TableScene {
   private renderer: THREE.WebGLRenderer;
   private scene = new THREE.Scene();
   private camera: THREE.PerspectiveCamera;
+  private controls: OrbitControls;
+  private userAdjustedCamera = false; // 使用者手動轉動/縮放過鏡頭後，resize 不再覆寫視角
   private container: HTMLElement;
   private callbacks: SceneCallbacks;
   private raf = 0;
@@ -179,6 +182,22 @@ export class TableScene {
     container.appendChild(this.renderer.domElement);
 
     this.camera = new THREE.PerspectiveCamera(52, 1, 0.1, 60);
+
+    // 讓玩家可拖曳旋轉／滾輪縮放鏡頭；限制角度與距離避免看到桌底或飛出場景
+    this.controls = new OrbitControls(this.camera, this.renderer.domElement);
+    this.controls.target.set(0, 0, 0.2);
+    this.controls.enableDamping = true;
+    this.controls.dampingFactor = 0.08;
+    this.controls.enablePan = false;
+    this.controls.minDistance = 7;
+    this.controls.maxDistance = 18;
+    this.controls.minPolarAngle = 0.28; // 較俯視
+    this.controls.maxPolarAngle = 1.05; // 較平視，仍看得到桌面
+    this.controls.minAzimuthAngle = -Math.PI / 2;
+    this.controls.maxAzimuthAngle = Math.PI / 2;
+    this.controls.addEventListener('start', () => {
+      this.userAdjustedCamera = true;
+    });
 
     // 光源：半球光打底＋方向光給牌面立體感
     this.scene.add(new THREE.HemisphereLight(0xffffff, 0x2c4a38, 1.0));
@@ -229,6 +248,7 @@ export class TableScene {
 
   dispose() {
     cancelAnimationFrame(this.raf);
+    this.controls.dispose();
     this.resizeObs.disconnect();
     this.renderer.domElement.removeEventListener('pointerdown', this.onPointerDown);
     this.renderer.domElement.removeEventListener('pointerup', this.onPointerUp);
@@ -250,10 +270,13 @@ export class TableScene {
     const aspect = w / h;
     this.camera.aspect = aspect;
     // 直式手機（窄畫面）把鏡頭拉高拉遠，確保左右兩側對手入鏡；
-    // 俯角壓低讓桌面填滿畫面，避免上方露出大片背景
-    const f = Math.min(1.55, Math.max(1, 0.68 / aspect));
-    this.camera.position.set(0, 9.4 * f, 6.0 * f);
-    this.camera.lookAt(0, 0, 0.2);
+    // 俯角壓低讓桌面填滿畫面，避免上方露出大片背景。
+    // 使用者手動轉動/縮放過鏡頭後，尊重其視角，resize 只調整投影矩陣。
+    if (!this.userAdjustedCamera) {
+      const f = Math.min(1.55, Math.max(1, 0.68 / aspect));
+      this.camera.position.set(0, 9.4 * f, 6.0 * f);
+      this.camera.lookAt(0, 0, 0.2);
+    }
     this.camera.updateProjectionMatrix();
   }
 
@@ -613,6 +636,7 @@ export class TableScene {
   // ── 每幀：位置/朝向插值＋光圈脈動 ─────────────────────────
   private tick() {
     const dt = Math.min(this.clock.getDelta(), 0.1);
+    this.controls.update();
     const a = 1 - Math.exp(-9 * dt);
     for (const node of this.nodes.values()) {
       node.mesh.position.lerp(node.targetPos, a);
