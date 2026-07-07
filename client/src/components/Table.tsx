@@ -3,6 +3,7 @@ import type { GameApi } from '../useGame.js';
 import { Card } from './Card.js';
 import { Scene3D } from '../three/Scene3D.js';
 import { playCardVoice, playEffect } from '../sound.js';
+import { moneyIconUrl } from '../money.js';
 import type { PublicPlayer, Card as CardT, GameOverPayload, DrawFiveView } from '@nine-cards/shared';
 
 const LS_VIEW3D = 'nineCards.view3d';
@@ -29,6 +30,7 @@ export function Table({ api }: { api: GameApi }) {
     .sort((a, b) => turnDist(b.seat) - turnDist(a.seat));
   const me = g.players.find((p) => p.seat === mySeat);
   const myScore = me?.score ?? 0;
+  const myMoney = me?.money ?? 0;
   const myTenpai = me?.isTenpai ?? false;
   const myXianggong = me?.isXianggong ?? false; // 相公：本局僅能觀看
   const deadIdSet = new Set(g.you.deadIds); // 我的死牌 id（出牌時須先出，§7.3）
@@ -221,6 +223,10 @@ export function Table({ api }: { api: GameApi }) {
         <span className="chip">
           我 {myScore} 頭{myTenpai && ' · 聽'}
           {myXianggong && <span className="xg-badge">相公</span>}
+          <span className="my-money">
+            <img className="money-icon" src={moneyIconUrl(myMoney)} alt="" />
+            {myMoney} 元
+          </span>
         </span>
         <span className={`chip turn ${myTurn ? 'me' : ''}`}>
           {myTurn ? '輪到你' : `輪到 ${turnName}`}
@@ -518,6 +524,7 @@ function FinalScoreboard({
                   {s.name}
                 </td>
                 <td className="score-total">{s.total} 頭</td>
+                <td className="score-money">{s.money} 元</td>
               </tr>
             ))}
           </tbody>
@@ -767,6 +774,7 @@ function RoundResult({
                     {d > 0 ? `+${d}` : d}
                   </td>
                   <td className="score-total">{s.total} 頭</td>
+                  <td className="score-money">{pl?.money ?? 0} 元</td>
                 </tr>
               );
             })}
@@ -860,6 +868,10 @@ function OpponentSeat({
         {p.isTenpai && <span className="tenpai-badge">聽</span>}
         {p.isXianggong && <span className="xg-badge">相公</span>}
         <span className="opp-score">{p.score} 頭</span>
+        <span className="opp-money">
+          <img className="money-icon" src={moneyIconUrl(p.money)} alt="" />
+          {p.money} 元
+        </span>
         {!p.connected && ' 📴'}
       </div>
       {/* 公開區（吃牌對子＋死牌單張）＋分隔線＋暗牌，同一列；死牌以單張未成對表示 */}

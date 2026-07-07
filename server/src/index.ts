@@ -102,6 +102,8 @@ io.on('connection', (socket) => {
       req?.isPublic ?? false,
       req?.hints ?? true,
       req?.claimSeconds,
+      req?.startingCapital,
+      req?.unitBet,
     );
     if (!r.ok || !r.room || !r.player) return respond(ack, { ok: false, error: r.error });
     socket.leave('lobby');

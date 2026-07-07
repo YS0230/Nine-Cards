@@ -11,6 +11,8 @@ export function Lobby({ api }: { api: GameApi }) {
   const [mode, setMode] = useState<Mode>(urlCode ? 'join' : 'menu');
   const [hints, setHints] = useState(true); // 建房選項：新手提示（可吃/胡才啟用按鈕）
   const [claimSeconds, setClaimSeconds] = useState(5); // 建房選項：吃牌窗等待秒數
+  const [startingCapital, setStartingCapital] = useState(2000); // 建房選項：本金（每位玩家初始金額）
+  const [unitBet, setUnitBet] = useState(50); // 建房選項：一頭金額
 
   const nameOk = name.trim().length > 0;
 
@@ -68,10 +70,35 @@ export function Lobby({ api }: { api: GameApi }) {
                 ))}
               </select>
             </label>
+            {/* 建房選項：本金（每位玩家初始金額） */}
+            <label className="field-select">
+              <span>本金</span>
+              <select
+                value={startingCapital}
+                onChange={(e) => setStartingCapital(Number(e.target.value))}
+              >
+                {[500, 1000, 2000, 3000, 5000].map((v) => (
+                  <option key={v} value={v}>
+                    {v} 元
+                  </option>
+                ))}
+              </select>
+            </label>
+            {/* 建房選項：一頭金額（頭數換算成錢的單價） */}
+            <label className="field-select">
+              <span>一頭</span>
+              <select value={unitBet} onChange={(e) => setUnitBet(Number(e.target.value))}>
+                {[10, 20, 50, 100, 200].map((v) => (
+                  <option key={v} value={v}>
+                    {v} 元
+                  </option>
+                ))}
+              </select>
+            </label>
             <button
               className="btn primary"
               disabled={!nameOk}
-              onClick={() => api.createRoom(name, true, hints, claimSeconds)}
+              onClick={() => api.createRoom(name, true, hints, claimSeconds, startingCapital, unitBet)}
             >
               建立公開房
             </button>
@@ -79,7 +106,7 @@ export function Lobby({ api }: { api: GameApi }) {
               <button
                 className="btn"
                 disabled={!nameOk}
-                onClick={() => api.createRoom(name, false, hints, claimSeconds)}
+                onClick={() => api.createRoom(name, false, hints, claimSeconds, startingCapital, unitBet)}
               >
                 建立私人房
               </button>

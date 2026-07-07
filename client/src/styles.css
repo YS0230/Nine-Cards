@@ -911,6 +911,27 @@ body {
   font-size: 12px;
   opacity: 0.75;
 }
+/* 剩餘金額：紙幣/硬幣圖示＋金額（自己與對手共用） */
+.money-icon {
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+  border-radius: 50%;
+  vertical-align: middle;
+  margin-right: 2px;
+}
+.opp-money,
+.my-money {
+  margin-left: 6px;
+  display: inline-flex;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--gold);
+}
+.score-money {
+  color: var(--gold);
+}
 .tenpai-badge {
   margin-left: 6px;
   padding: 1px 6px;

@@ -44,3 +44,4 @@ coverage/
 # Generated files
 client/public/cards/
 client/public/audio/
+client/public/money/

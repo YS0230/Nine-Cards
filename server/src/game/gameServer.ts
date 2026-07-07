@@ -5,6 +5,8 @@ import type { ActionType, RoomView, RoomPhase, LobbyRoom, GameEndedPayload } fro
 
 const MAX_PLAYERS = 4;
 const MIN_PLAYERS = 2;
+const DEFAULT_STARTING_CAPITAL = 2000; // 本金預設值（元）
+const DEFAULT_UNIT_BET = 50; // 一頭預設值（元）
 
 export interface Player {
   id: string;
@@ -21,12 +23,15 @@ export interface Room {
   isPublic: boolean;
   hints: boolean; // 新手提示（建房時選擇）：開＝伺服器預檢吃/胡、前端鎖定按鈕
   claimMs: number; // 吃牌窗等待毫秒（建房時選擇秒數）
+  startingCapital: number; // 本金：每位玩家初始金額（建房時選擇）
+  unitBet: number; // 一頭金額：頭數換算成錢的單價（建房時選擇）
   phase: RoomPhase;
   players: Player[]; // 依加入順序，開局後 seat 對齊索引
   hostId: string | null;
   engine: GameEngine | null;
   lastDealerSeat: number;
   scores: Map<string, number>; // playerId → 本場累計頭數（跨局保留）
+  money: Map<string, number>; // playerId → 剩餘金額（本金 + 頭數 × 一頭，跨局保留）
   settled: boolean; // 本局結算是否已套用（避免重複計分）
   readyIds: Set<string>; // 結算後已按「繼續」的 playerId（全員按下才開下一局，§13）
   claimTimer?: ReturnType<typeof setTimeout>;
@@ -98,6 +103,8 @@ export class GameServer {
     isPublic = false,
     hints = true,
     claimSeconds?: number,
+    startingCapital?: number,
+    unitBet?: number,
   ): JoinOutcome {
     const id = randomUUID();
     const code = makeCode(new Set(this.codeIndex.keys()));
@@ -106,18 +113,26 @@ export class GameServer {
     const secs = Number(claimSeconds);
     const claimMs =
       Number.isFinite(secs) && secs >= 1 && secs <= 30 ? Math.round(secs * 1000) : CLAIM_WINDOW_MS;
+    // 本金／一頭（建房選項）：需為正整數，非法值回落預設
+    const capital = Number(startingCapital);
+    const cap = Number.isFinite(capital) && capital > 0 ? Math.round(capital) : DEFAULT_STARTING_CAPITAL;
+    const bet = Number(unitBet);
+    const unit = Number.isFinite(bet) && bet > 0 ? Math.round(bet) : DEFAULT_UNIT_BET;
     const room: Room = {
       id,
       code,
       isPublic,
       hints,
       claimMs,
+      startingCapital: cap,
+      unitBet: unit,
       phase: 'WAITING',
       players: [host],
       hostId: host.id,
       engine: null,
       lastDealerSeat: 0,
       scores: new Map(),
+      money: new Map(),
       settled: false,
       readyIds: new Set(),
       paused: false,
@@ -207,8 +222,9 @@ export class GameServer {
     // 開局：把座位壓實成 0..k-1，讓引擎座位對齊
     room.players.forEach((p, i) => (p.seat = i));
     const seats: SeatInit[] = room.players.map((p) => ({ id: p.id, name: p.name }));
-    // 本場累計頭數歸零（每位玩家）
+    // 本場累計頭數歸零、金額回到本金（每位玩家）
     room.scores = new Map(room.players.map((p) => [p.id, 0]));
+    room.money = new Map(room.players.map((p) => [p.id, room.startingCapital]));
     // §4.1：第一局由玩家自己抽牌決定莊家（引擎進入 DEAL_DRAW，莊家決定後才發牌）
     room.engine = new GameEngine(seats, null, undefined, {
       hints: room.hints,
@@ -218,6 +234,7 @@ export class GameServer {
     room.settled = false;
     room.phase = 'PLAYING';
     this.syncScores(room);
+    this.syncMoney(room);
     this.scheduleClaim(room);
     return { ok: true, room };
   }
@@ -230,19 +247,30 @@ export class GameServer {
     }
   }
 
-  // 一局結束：套用本局頭數變化到跨局累計，並補齊 roundResult 的 scores/nextDealerSeat
+  // 把 room.money 的跨局累計同步進引擎玩家，讓 viewFor 帶出目前剩餘金額
+  private syncMoney(room: Room) {
+    if (!room.engine) return;
+    for (const ep of room.engine.players) {
+      ep.money = room.money.get(ep.id) ?? room.startingCapital;
+    }
+  }
+
+  // 一局結束：套用本局頭數變化到跨局累計（金額＝頭數 × 一頭），並補齊 roundResult 的 scores/nextDealerSeat
   private settleRound(room: Room) {
     const rr = room.engine?.roundResult;
     if (!rr || room.settled) return;
     room.settled = true;
     for (const pay of rr.payments) {
       const pl = room.players[pay.seat];
-      if (pl) room.scores.set(pl.id, (room.scores.get(pl.id) ?? 0) + pay.delta);
+      if (!pl) continue;
+      room.scores.set(pl.id, (room.scores.get(pl.id) ?? 0) + pay.delta);
+      room.money.set(pl.id, (room.money.get(pl.id) ?? room.startingCapital) + pay.delta * room.unitBet);
     }
     // 流局：原莊連任（§4.2）；胡牌：胡牌者當莊（引擎已設）
     if (rr.reason === 'draw') rr.nextDealerSeat = room.lastDealerSeat;
     rr.scores = room.players.map((p) => ({ seat: p.seat, total: room.scores.get(p.id) ?? 0 }));
     this.syncScores(room);
+    this.syncMoney(room);
     room.readyIds = new Set(); // 結算後等待全員按「繼續」才開下一局（§13）
   }
 
@@ -285,6 +313,7 @@ export class GameServer {
     });
     room.settled = false;
     this.syncScores(room);
+    this.syncMoney(room);
     if (room.engine.phase === 'FINISHED') {
       // 連續天胡：直接結算（會再排下一局）
       room.phase = 'FINISHED';
@@ -426,7 +455,12 @@ export class GameServer {
       reason: 'playerLeft',
       leaverName,
       scores: room.players
-        .map((pl) => ({ seat: pl.seat, name: pl.name, total: room.scores.get(pl.id) ?? 0 }))
+        .map((pl) => ({
+          seat: pl.seat,
+          name: pl.name,
+          total: room.scores.get(pl.id) ?? 0,
+          money: room.money.get(pl.id) ?? room.startingCapital,
+        }))
         .sort((a, b) => b.total - a.total),
     };
   }
@@ -469,6 +503,8 @@ export class GameServer {
       isPublic: room.isPublic,
       hints: room.hints,
       claimSeconds: Math.round(room.claimMs / 1000),
+      startingCapital: room.startingCapital,
+      unitBet: room.unitBet,
       seats,
       hostId: room.hostId,
       maxPlayers: MAX_PLAYERS,

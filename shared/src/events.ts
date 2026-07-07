@@ -43,6 +43,8 @@ export interface CreateRoomReq {
   isPublic?: boolean;
   hints?: boolean; // 新手提示（預設開）：伺服器預檢吃/胡並鎖定按鈕
   claimSeconds?: number; // 吃牌窗等待秒數（1–30；未給或非法值用伺服器預設）
+  startingCapital?: number; // 本金（每位玩家初始金額，預設 2000；未給或非法值用伺服器預設）
+  unitBet?: number; // 一頭金額（頭數換算成錢的單價，預設 50；未給或非法值用伺服器預設）
 }
 export interface JoinRoomReq {
   code: string;

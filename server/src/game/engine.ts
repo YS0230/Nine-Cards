@@ -48,6 +48,7 @@ interface EnginePlayer {
   connected: boolean;
   isDealer: boolean;
   score: number; // 本場累計頭數（由 gameServer 跨局維護，viewFor 帶出）
+  money: number; // 剩餘金額（由 gameServer 跨局維護，viewFor 帶出）
 }
 
 // 胡牌時據以計分的情境（§9.2 抽五隻資格、§10.1 胡開）
@@ -180,6 +181,7 @@ export class GameEngine {
       connected: true,
       isDealer: false,
       score: 0,
+      money: 0,
     }));
     if (dealerSeat === null) {
       this.startDealerDraw();
@@ -871,6 +873,7 @@ export class GameEngine {
       isTenpai: this.tenpai[p.seat],
       isXianggong: this.xianggong[p.seat],
       score: p.score,
+      money: p.money,
     }));
     const lastDrawn =
       this.pending && this.pending.kind === 'drawn' && this.stage === 'CLAIM'

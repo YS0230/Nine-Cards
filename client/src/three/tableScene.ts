@@ -35,6 +35,60 @@ const OPP_SIDE = { hand: 3.7, pub: 2.35 };
 const DECK_POS = new THREE.Vector3(0, 0, -1.35); // 牌堆：桌面中央偏遠側，橫放堆疊
 const CLAIM_POS = new THREE.Vector3(0, 1.28, 0.55);
 
+// 各家剩餘金額：直接堆在桌面上（紙幣可重疊、硬幣疊在紙幣最上方）。
+// 刻意偏離該側手牌／公開區的中心線，避免被牌擋住或落在鏡頭視野外。
+const MONEY_ANCHOR: Record<'top' | 'left' | 'right', THREE.Vector3> = {
+  top: new THREE.Vector3(2.6, 0, -3.9),
+  left: new THREE.Vector3(-2.9, 0, -3.3),
+  right: new THREE.Vector3(2.9, 0, -3.3),
+};
+const MY_MONEY_ANCHOR = new THREE.Vector3(-2.9, 0, 3.1);
+
+const BILL_W = 1.0;
+const BILL_H = BILL_W * 0.45; // 鈔票素材長寬比約略相同，統一比例
+const COIN_R = 0.34;
+const BILL_DENOMS = [2000, 1000, 500, 200] as const; // 紙幣（矩形）
+const COIN_DENOMS = [50, 10] as const; // 錢幣（圓形）
+const MAX_BILLS = 10;
+const MAX_COINS = 6;
+
+// 把剩餘金額拆成紙幣＋錢幣張數（純視覺呈現，非實際找零；上限避免堆疊過誇張）
+function breakdownMoney(amount: number): { bills: number[]; coins: number[] } {
+  let remain = Math.max(0, Math.round(amount));
+  const bills: number[] = [];
+  for (const d of BILL_DENOMS) {
+    while (remain >= d && bills.length < MAX_BILLS) {
+      bills.push(d);
+      remain -= d;
+    }
+  }
+  const coins: number[] = [];
+  for (const d of COIN_DENOMS) {
+    while (remain >= d && coins.length < MAX_COINS) {
+      coins.push(d);
+      remain -= d;
+    }
+  }
+  if (bills.length === 0 && coins.length === 0 && amount > 0) coins.push(10);
+  return { bills, coins };
+}
+
+interface MoneyTarget {
+  key: string;
+  denom: number;
+  kind: 'bill' | 'coin';
+  pos: THREE.Vector3;
+  quat: THREE.Quaternion;
+}
+
+interface MoneyNode {
+  mesh: THREE.Mesh;
+  mat: THREE.MeshLambertMaterial;
+  denom: number;
+  targetPos: THREE.Vector3;
+  targetQuat: THREE.Quaternion;
+}
+
 // 一張牌的顯示目標
 interface CardTarget {
   key: string;
@@ -89,6 +143,12 @@ export class TableScene {
   private nodes = new Map<string, CardNode>();
   private textures = new Map<string, THREE.Texture>();
   private loader = new THREE.TextureLoader();
+
+  // 桌面金額呈現：紙幣（平面矩形）＋錢幣（平面圓形，疊在紙幣最上方）
+  private billGeo = new THREE.PlaneGeometry(BILL_W, BILL_H);
+  private coinGeo = new THREE.CircleGeometry(COIN_R, 28);
+  private moneyTextures = new Map<number, THREE.Texture>();
+  private moneyNodes = new Map<string, MoneyNode>();
   private everSynced = false; // 首次同步不做飛牌動畫（重連/切回 3D 直接就定位）
   private prevDiscardLen = 0; // 上次同步的棄牌數：判斷哪些是「剛打出」的牌
   private prevActorSeat: number | null = null; // 上次同步時最可能出牌的座位（吃牌者＞行動者）
@@ -177,6 +237,10 @@ export class TableScene {
     this.cardGeo.dispose();
     for (const t of this.textures.values()) t.dispose();
     for (const n of this.nodes.values()) n.faceMat.dispose();
+    this.billGeo.dispose();
+    this.coinGeo.dispose();
+    for (const t of this.moneyTextures.values()) t.dispose();
+    for (const n of this.moneyNodes.values()) n.mat.dispose();
   }
 
   private resize() {
@@ -250,6 +314,9 @@ export class TableScene {
     // 光圈：有待吃牌時顯示在其正下方
     this.claimRing.visible = !!input.g.pendingClaim;
     this.claimRing.position.set(CLAIM_POS.x, 0.02, CLAIM_POS.z);
+
+    // 各家剩餘金額：直接堆在桌面上（紙幣可重疊、錢幣疊在最上方）
+    this.syncMoneyNodes(this.computeMoneyTargets(input.g));
 
     // 供下次同步判斷「剛打出的牌從誰那邊飛出」
     this.everSynced = true;
@@ -468,6 +535,81 @@ export class TableScene {
     }
   }
 
+  // 各家剩餘金額的桌面座標：紙幣由大到小堆疊（每張些微錯位重疊），錢幣疊在紙幣最上方
+  private computeMoneyTargets(g: PersonalGameState): MoneyTarget[] {
+    const out: MoneyTarget[] = [];
+    const mySeat = g.you.seat;
+    const seatCount = g.players.length;
+    const turnDist = (seat: number) => (mySeat - seat + seatCount) % seatCount;
+
+    for (const p of g.players) {
+      const anchor =
+        p.seat === mySeat ? MY_MONEY_ANCHOR : MONEY_ANCHOR[this.zoneOf(turnDist(p.seat), seatCount)];
+      const { bills, coins } = breakdownMoney(p.money);
+      let y = 0.02;
+      bills.forEach((denom, i) => {
+        const jx = jitterOf(`${p.seat}b${i}`) * 0.7;
+        const jz = jitterOf(`${p.seat}B${i}`) * 0.7;
+        const spin = jitterOf(`${p.seat}bs${i}`) * Math.PI;
+        out.push({
+          key: `m:${p.seat}:bill:${i}`,
+          denom,
+          kind: 'bill',
+          pos: new THREE.Vector3(anchor.x + jx, y, anchor.z + jz),
+          quat: quatFlatUp(spin),
+        });
+        y += 0.012;
+      });
+      y += 0.015; // 紙幣堆與錢幣之間留一點高度差
+      coins.forEach((denom, i) => {
+        const jx = jitterOf(`${p.seat}c${i}`) * 0.32;
+        const jz = jitterOf(`${p.seat}C${i}`) * 0.32;
+        out.push({
+          key: `m:${p.seat}:coin:${i}`,
+          denom,
+          kind: 'coin',
+          pos: new THREE.Vector3(anchor.x + jx, y, anchor.z + jz),
+          quat: quatFlatUp(0),
+        });
+        y += 0.02;
+      });
+    }
+    return out;
+  }
+
+  private syncMoneyNodes(targets: MoneyTarget[]) {
+    const seen = new Set<string>();
+    for (const t of targets) {
+      seen.add(t.key);
+      let node = this.moneyNodes.get(t.key);
+      if (!node) {
+        const mat = new THREE.MeshLambertMaterial({
+          map: this.moneyTexture(t.denom),
+          side: THREE.DoubleSide,
+        });
+        const mesh = new THREE.Mesh(t.kind === 'bill' ? this.billGeo : this.coinGeo, mat);
+        mesh.position.copy(t.pos);
+        mesh.quaternion.copy(t.quat);
+        this.scene.add(mesh);
+        node = { mesh, mat, denom: t.denom, targetPos: t.pos.clone(), targetQuat: t.quat.clone() };
+        this.moneyNodes.set(t.key, node);
+      }
+      if (node.denom !== t.denom) {
+        node.denom = t.denom;
+        node.mat.map = this.moneyTexture(t.denom);
+        node.mat.needsUpdate = true;
+      }
+      node.targetPos.copy(t.pos);
+      node.targetQuat.copy(t.quat);
+    }
+    for (const [key, node] of this.moneyNodes) {
+      if (seen.has(key)) continue;
+      this.scene.remove(node.mesh);
+      node.mat.dispose();
+      this.moneyNodes.delete(key);
+    }
+  }
+
   // ── 每幀：位置/朝向插值＋光圈脈動 ─────────────────────────
   private tick() {
     const dt = Math.min(this.clock.getDelta(), 0.1);
@@ -476,6 +618,10 @@ export class TableScene {
       node.mesh.position.lerp(node.targetPos, a);
       node.mesh.quaternion.slerp(node.targetQuat, a);
       node.mesh.scale.setScalar(THREE.MathUtils.lerp(node.mesh.scale.x, node.targetScale, a));
+    }
+    for (const node of this.moneyNodes.values()) {
+      node.mesh.position.lerp(node.targetPos, a);
+      node.mesh.quaternion.slerp(node.targetQuat, a);
     }
     if (this.claimRing.visible) {
       const t = this.clock.elapsedTime;
@@ -511,6 +657,16 @@ export class TableScene {
       tex.colorSpace = THREE.SRGBColorSpace;
       tex.anisotropy = Math.min(4, this.renderer.capabilities.getMaxAnisotropy());
       this.textures.set(base, tex);
+    }
+    return tex;
+  }
+
+  private moneyTexture(denom: number): THREE.Texture {
+    let tex = this.moneyTextures.get(denom);
+    if (!tex) {
+      tex = this.loader.load(`/money/${denom}.png`);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      this.moneyTextures.set(denom, tex);
     }
     return tex;
   }

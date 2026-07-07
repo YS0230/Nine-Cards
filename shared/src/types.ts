@@ -20,6 +20,8 @@ export interface RoomView {
   isPublic: boolean;
   hints: boolean; // 新手提示：伺服器預先檢核可吃/可胡並鎖定按鈕（建房時選擇）
   claimSeconds: number; // 吃牌窗等待秒數（建房時選擇）
+  startingCapital: number; // 本金：每位玩家初始金額（建房時選擇）
+  unitBet: number; // 一頭金額：頭數換算成錢的單價（建房時選擇）
   seats: RoomSeat[];
   hostId: string | null;
   maxPlayers: number;
@@ -46,6 +48,7 @@ export interface PublicPlayer {
   isTenpai: boolean; // 是否聽牌（§7）
   isXianggong: boolean; // 相公：吃牌優先權最高卻逾時未吃 → 本局僅能觀看
   score: number; // 本場累計頭數（跨局；由 gameServer 維護）
+  money: number; // 剩餘金額＝本金 + 頭數 × 一頭（跨局；由 gameServer 維護）
 }
 
 // ── 對局中：送給「你自己」的完整資訊 ────────────────────
@@ -152,5 +155,5 @@ export interface GameOverPayload {
 export interface GameEndedPayload {
   reason: 'playerLeft'; // 目前僅「有玩家離開」會結束整場
   leaverName: string; // 觸發結束的離開者名稱
-  scores: { seat: number; name: string; total: number }[]; // 各家最終累計頭數
+  scores: { seat: number; name: string; total: number; money: number }[]; // 各家最終累計頭數／剩餘金額
 }
