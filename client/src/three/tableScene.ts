@@ -31,27 +31,32 @@ const CARD_D = 0.05;
 const MY_HAND_Z = 3.95;
 const MY_PUBLIC_Z = 2.7; // 我的公開區（吃牌對子＋死牌）
 const OPP_TOP = { hand: -4.35, pub: -3.1 };
-// 側邊暗牌橫向（長軸朝畫面外）刻意出血到視野邊緣，只需看得出餘牌數
+// 側邊：暗牌立牌沿桌緣排開（背朝桌心，見 quatFacingOut）；公開區仍平放
 const OPP_SIDE = { hand: 3.7, pub: 2.35 };
 const DECK_POS = new THREE.Vector3(0, 0, -1.35); // 牌堆：桌面中央偏遠側，橫放堆疊
 const CLAIM_POS = new THREE.Vector3(0, 1.28, 0.55);
 
 // 各家剩餘金額：直接堆在桌面上（紙幣可重疊、硬幣疊在紙幣最上方）。
-// 刻意偏離該側手牌／公開區的中心線，避免被牌擋住或落在鏡頭視野外。
+// 位置貼近該玩家那一側的桌緣（桌寬半徑 4.8／桌深半徑 6.2），
+// 紙幣堆疊時再往桌面中心方向逐張內縮（見 BILL_FAN_STEP），錢幣則並排不重疊（見 COIN_SPACING）。
 const MONEY_ANCHOR: Record<'top' | 'left' | 'right', THREE.Vector3> = {
-  top: new THREE.Vector3(2.6, 0, -3.9),
-  left: new THREE.Vector3(-2.9, 0, -3.3),
-  right: new THREE.Vector3(2.9, 0, -3.3),
+  top: new THREE.Vector3(0, 0, -5.5),
+  left: new THREE.Vector3(-4.15, 0, 0),
+  right: new THREE.Vector3(4.15, 0, 0),
 };
-const MY_MONEY_ANCHOR = new THREE.Vector3(-2.9, 0, 3.1);
+const MY_MONEY_ANCHOR = new THREE.Vector3(0, 0, 5.5);
 
 const BILL_W = 1.0;
 const BILL_H = BILL_W * 0.45; // 鈔票素材長寬比約略相同，統一比例
-const COIN_R = 0.34;
+const COIN_R = 0.09; // 面積約為紙鈔（BILL_W×BILL_H）的 1/18
 const BILL_DENOMS = [2000, 1000, 500, 200] as const; // 紙幣（矩形）
 const COIN_DENOMS = [50, 10] as const; // 錢幣（圓形）
 const MAX_BILLS = 10;
 const MAX_COINS = 6;
+// 紙幣疊放時每張往桌面中心方向位移的距離，讓下層邊緣露出、才看得出總共疊了幾張
+const BILL_FAN_STEP = 0.09;
+// 錢幣改成並排一列，間距需大於直徑（2×COIN_R）才不會互相覆蓋
+const COIN_SPACING = COIN_R * 2 + 0.03;
 
 // 把剩餘金額拆成紙幣＋錢幣張數（純視覺呈現，非實際找零；上限避免堆疊過誇張）
 function breakdownMoney(amount: number): { bills: number[]; coins: number[] } {
@@ -101,12 +106,13 @@ interface CardTarget {
   pickable: boolean;
   isPass: boolean;
   selected: boolean;
+  peekText?: string; // 暗牌「牌面」朝外那一側轉鏡頭偷看時顯示的整人文字（未指定＝牌背花紋）
 }
 
 interface CardNode {
   mesh: THREE.Mesh;
   faceMat: THREE.MeshLambertMaterial;
-  base: string | null; // 目前貼圖檔名（牌背為 null）
+  faceKey: string | null; // 目前貼圖識別碼：真牌用檔名；暗牌用 peekText（或固定值代表牌背花紋）
   targetPos: THREE.Vector3;
   targetQuat: THREE.Quaternion;
   targetScale: number;
@@ -120,6 +126,11 @@ const quatFlatDown = (spin = 0) =>
 // 立起、面朝自己（略後仰對準俯視鏡頭）
 const quatFacingMe = (tilt = -0.45) =>
   new THREE.Quaternion().setFromEuler(new THREE.Euler(tilt, 0, 0));
+// 立起、背朝桌面中心（他家暗牌：站立但牌面朝外看不到，只有牌背朝向鏡頭/桌心）。
+// yaw：0 度時牌面朝 +z（面向鏡頭），故各方位需轉到牌面朝外、背朝內；
+// roll：繞牌本身厚度軸（局部 Z）傾斜，使扇形展開時底部不動、頂部左右分散
+const quatFacingOut = (yaw: number, roll = 0, tilt = 0.12) =>
+  new THREE.Quaternion().setFromEuler(new THREE.Euler(tilt, yaw, roll));
 
 // 以牌 id 產生固定的微小旋轉抖動，讓棄牌看起來自然（不隨 re-render 亂跳）
 function jitterOf(id: string): number {
@@ -145,6 +156,7 @@ export class TableScene {
   private backMat: THREE.MeshLambertMaterial;
   private nodes = new Map<string, CardNode>();
   private textures = new Map<string, THREE.Texture>();
+  private peekTextures = new Map<string, THREE.Texture>(); // 偷看暗牌牌面時顯示的整人文字貼圖（依文字快取）
   private loader = new THREE.TextureLoader();
 
   // 桌面金額呈現：紙幣（平面矩形）＋錢幣（平面圓形，疊在紙幣最上方）
@@ -256,6 +268,7 @@ export class TableScene {
     this.renderer.dispose();
     this.cardGeo.dispose();
     for (const t of this.textures.values()) t.dispose();
+    for (const t of this.peekTextures.values()) t.dispose();
     for (const n of this.nodes.values()) n.faceMat.dispose();
     this.billGeo.dispose();
     this.coinGeo.dispose();
@@ -303,18 +316,24 @@ export class TableScene {
         node = {
           mesh,
           faceMat,
-          base: null,
+          faceKey: null,
           targetPos: new THREE.Vector3(),
           targetQuat: new THREE.Quaternion(),
           targetScale: 1,
         };
         this.nodes.set(t.key, node);
       }
-      // 牌面貼圖：牌背朝上者不需要；同一 key 換牌（新局重用 id）時換貼圖
+      // 牌面貼圖：真牌用檔名；暗牌（立牌背對桌心，牌面朝外）換上整人文字，
+      // 沒有指定文字（例如牌堆）則用牌背花紋，避免真的顯示空白（原本 faceMat 預設白色會被誤認成偷看破口）
       const base = t.card ? cardImageBase(t.card) : null;
-      if (base !== node.base) {
-        node.base = base;
-        node.faceMat.map = base ? this.faceTexture(base) : this.backMat.map;
+      const faceKey = base ?? `peek:${t.peekText ?? ''}`;
+      if (faceKey !== node.faceKey) {
+        node.faceKey = faceKey;
+        node.faceMat.map = base
+          ? this.faceTexture(base)
+          : t.peekText
+            ? this.peekTexture(t.peekText)
+            : this.backMat.map;
         node.faceMat.needsUpdate = true;
       }
       node.targetPos.copy(t.pos);
@@ -368,7 +387,9 @@ export class TableScene {
       card: CardT | null,
       pos: THREE.Vector3,
       quat: THREE.Quaternion,
-      opts: Partial<Pick<CardTarget, 'pickable' | 'isPass' | 'selected' | 'scale' | 'spawn'>> = {},
+      opts: Partial<
+        Pick<CardTarget, 'pickable' | 'isPass' | 'selected' | 'scale' | 'spawn' | 'peekText'>
+      > = {},
     ) =>
       out.push({
         key,
@@ -380,6 +401,7 @@ export class TableScene {
         pickable: opts.pickable ?? false,
         isPass: opts.isPass ?? false,
         selected: opts.selected ?? false,
+        peekText: opts.peekText,
       });
 
     // 佔用桌面中央的特殊牌（待吃／吃牌中）不重複畫在別區
@@ -521,25 +543,37 @@ export class TableScene {
       card: CardT | null,
       pos: THREE.Vector3,
       quat: THREE.Quaternion,
-      opts?: { spawn?: THREE.Vector3 },
+      opts?: { spawn?: THREE.Vector3; peekText?: string },
     ) => void,
   ) {
     // 沿著該側的排列方向：top 沿 x、side 沿 z
-    const place = (offset: number, line: 'hand' | 'pub'): THREE.Vector3 => {
+    const place = (offset: number, line: 'hand' | 'pub', y = 0.03): THREE.Vector3 => {
       if (zone === 'top')
-        return new THREE.Vector3(offset, 0.03, line === 'hand' ? OPP_TOP.hand : OPP_TOP.pub);
+        return new THREE.Vector3(offset, y, line === 'hand' ? OPP_TOP.hand : OPP_TOP.pub);
       const x = (zone === 'left' ? -1 : 1) * (line === 'hand' ? OPP_SIDE.hand : OPP_SIDE.pub);
-      return new THREE.Vector3(x, 0.03, offset);
+      return new THREE.Vector3(x, y, offset);
     };
     const spin = zone === 'top' ? 0 : zone === 'left' ? -Math.PI / 2 : Math.PI / 2;
 
-    // 暗牌置中排開。側邊座位橫放（長軸朝畫面外），外側牌身隱沒在視野邊緣，
-    // 只需看得出剩幾張
+    // 暗牌置中排開、立牌呈扇形：底部（貼桌處）互相重疊，往上依 roll 角度展開
+    // （背朝桌心／鏡頭，牌面完全看不到）
     const hn = p.handCount;
-    const hStep = zone === 'top' ? 0.44 : 0.42;
-    const h0 = -((hn - 1) * hStep) / 2;
+    const rowStep = 0.09; // 底部間距：故意留小，讓牌腳重疊
+    const rollStep = hn > 1 ? Math.min(0.15, 1.4 / (hn - 1)) : 0;
+    const row0 = -((hn - 1) * rowStep) / 2;
+    const handYaw = zone === 'top' ? Math.PI : zone === 'left' ? -Math.PI / 2 : Math.PI / 2;
+    // 左側 yaw 方向與列序（row0+i*rowStep）搭配時，roll 造成的頂部展開方向恰與列序相反而互相抵銷
+    // （牌腳反而散開、牌頂反而聚攏），故左側要反轉 roll 符號才會跟右側對稱
+    const rollSign = zone === 'left' ? -1 : 1;
+    const upLocal = new THREE.Vector3(0, CARD_H / 2, 0);
+    // 轉鏡頭從側面偷看暗牌「牌面」朝外那一側時，顯示整人文字而非空白
+    const peekText = zone === 'right' ? '港跨' : zone === 'left' ? '拍罵' : undefined;
     for (let i = 0; i < hn; i++) {
-      push(`h${p.seat}:${i}`, null, place(h0 + i * hStep, 'hand'), quatFlatDown(spin + jitterOf(`${p.seat}:${i}`) * 0.2));
+      const roll = rollSign * (i - (hn - 1) / 2) * rollStep + jitterOf(`${p.seat}:${i}`) * 0.05;
+      const quat = quatFacingOut(handYaw, roll);
+      const pivot = place(row0 + i * rowStep, 'hand', 0.02); // 貼桌的牌腳
+      const center = pivot.clone().add(upLocal.clone().applyQuaternion(quat));
+      push(`h${p.seat}:${i}`, null, center, quat, { peekText });
     }
 
     // 公開區：由中心往外排；剛吃進的牌從該玩家方位滑入
@@ -558,7 +592,7 @@ export class TableScene {
     }
   }
 
-  // 各家剩餘金額的桌面座標：紙幣由大到小堆疊（每張些微錯位重疊），錢幣疊在紙幣最上方
+  // 各家剩餘金額的桌面座標：紙幣由大到小堆疊（每張些微錯位重疊），錢幣並排一列置於紙幣堆上方（不互相重疊）
   private computeMoneyTargets(g: PersonalGameState): MoneyTarget[] {
     const out: MoneyTarget[] = [];
     const mySeat = g.you.seat;
@@ -566,35 +600,57 @@ export class TableScene {
     const turnDist = (seat: number) => (mySeat - seat + seatCount) % seatCount;
 
     for (const p of g.players) {
-      const anchor =
-        p.seat === mySeat ? MY_MONEY_ANCHOR : MONEY_ANCHOR[this.zoneOf(turnDist(p.seat), seatCount)];
+      const isMe = p.seat === mySeat;
+      const zone = isMe ? null : this.zoneOf(turnDist(p.seat), seatCount);
+      const anchor = isMe ? MY_MONEY_ANCHOR : MONEY_ANCHOR[zone!];
+      // 每一側都貼著該側桌緣放置，堆疊要往桌面中心方向內縮，才不會露出桌外也才看得出張數
+      const fanDir =
+        zone === 'top'
+          ? new THREE.Vector3(0, 0, 1)
+          : zone === 'left'
+            ? new THREE.Vector3(1, 0, 0)
+            : zone === 'right'
+              ? new THREE.Vector3(-1, 0, 0)
+              : new THREE.Vector3(0, 0, -1); // 我方（桌緣在 +z）
+      // 紙鈔正面朝上時，圖案「上緣」朝該玩家自己那側（即背對桌心，與 fanDir 相反），
+      // 讓每家看到的都是自己讀得順的方向，而不是全部統一朝我
+      const billBaseSpin =
+        zone === 'top' ? Math.PI : zone === 'left' ? -Math.PI / 2 : zone === 'right' ? Math.PI / 2 : 0;
       const { bills, coins } = breakdownMoney(p.money);
       let y = 0.02;
       bills.forEach((denom, i) => {
-        const jx = jitterOf(`${p.seat}b${i}`) * 0.7;
-        const jz = jitterOf(`${p.seat}B${i}`) * 0.7;
-        const spin = jitterOf(`${p.seat}bs${i}`) * Math.PI;
+        const fan = i * BILL_FAN_STEP;
+        const jx = jitterOf(`${p.seat}b${i}`) * 0.25;
+        const jz = jitterOf(`${p.seat}B${i}`) * 0.25;
+        const spin = jitterOf(`${p.seat}bs${i}`) * 0.3;
         out.push({
           key: `m:${p.seat}:bill:${i}`,
           denom,
           kind: 'bill',
-          pos: new THREE.Vector3(anchor.x + jx, y, anchor.z + jz),
-          quat: quatFlatUp(spin),
+          pos: new THREE.Vector3(
+            anchor.x + fanDir.x * fan + jx,
+            y,
+            anchor.z + fanDir.z * fan + jz,
+          ),
+          quat: quatFlatUp(billBaseSpin + spin),
         });
         y += 0.012;
       });
       y += 0.015; // 紙幣堆與錢幣之間留一點高度差
+      // 錢幣沿垂直於扇開方向排成一列（間距大於直徑），彼此不重疊；置於紙幣堆中央上方
+      const perpDir = new THREE.Vector3(fanDir.z, 0, -fanDir.x);
+      const billSpread = Math.max(0, bills.length - 1) * BILL_FAN_STEP;
+      const coinBase = anchor.clone().addScaledVector(fanDir, billSpread / 2);
       coins.forEach((denom, i) => {
-        const jx = jitterOf(`${p.seat}c${i}`) * 0.32;
-        const jz = jitterOf(`${p.seat}C${i}`) * 0.32;
+        const offset = (i - (coins.length - 1) / 2) * COIN_SPACING;
         out.push({
           key: `m:${p.seat}:coin:${i}`,
           denom,
           kind: 'coin',
-          pos: new THREE.Vector3(anchor.x + jx, y, anchor.z + jz),
+          pos: coinBase.clone().addScaledVector(perpDir, offset).setY(y),
           quat: quatFlatUp(0),
         });
-        y += 0.02;
+        y += 0.002;
       });
     }
     return out;
@@ -685,6 +741,15 @@ export class TableScene {
     return tex;
   }
 
+  private peekTexture(text: string): THREE.Texture {
+    let tex = this.peekTextures.get(text);
+    if (!tex) {
+      tex = makePeekTexture(text);
+      this.peekTextures.set(text, tex);
+    }
+    return tex;
+  }
+
   private moneyTexture(denom: number): THREE.Texture {
     let tex = this.moneyTextures.get(denom);
     if (!tex) {
@@ -717,6 +782,30 @@ function makeBackTexture(): THREE.CanvasTexture {
     ctx.lineTo(0, y + c.width);
     ctx.stroke();
   }
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+// 偷看整人牌貼圖：暗牌牌面朝外那一側轉鏡頭偷看時顯示的文字（警示紅底＋直排文字），依文字快取
+function makePeekTexture(text: string): THREE.CanvasTexture {
+  const c = document.createElement('canvas');
+  c.width = 96;
+  c.height = 344;
+  const ctx = c.getContext('2d')!;
+  ctx.fillStyle = '#7a1620';
+  ctx.fillRect(0, 0, c.width, c.height);
+  ctx.strokeStyle = 'rgba(255,224,150,0.85)';
+  ctx.lineWidth = 4;
+  ctx.strokeRect(7, 7, c.width - 14, c.height - 14);
+  ctx.fillStyle = '#ffe9b0';
+  ctx.font = 'bold 30px "Microsoft JhengHei", "PingFang TC", sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  const chars = [...text];
+  const lineHeight = 40;
+  const startY = c.height / 2 - ((chars.length - 1) * lineHeight) / 2;
+  chars.forEach((ch, i) => ctx.fillText(ch, c.width / 2, startY + i * lineHeight));
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
