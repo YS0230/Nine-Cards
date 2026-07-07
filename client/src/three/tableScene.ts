@@ -323,15 +323,17 @@ export class TableScene {
       if (card.id === claimId || card.id === eatingId) return;
       const col = i % 10;
       const row = Math.floor(i / 10);
+      const overflow = Math.max(0, row - 2); // 超過 3 列疊在最後一列，用位移錯開避免與同格舊牌完全重疊
+      const j = jitterOf(card.id);
       push(
         `c:${card.id}`,
         card,
         new THREE.Vector3(
-          -1.67 + col * 0.37,
+          -1.67 + col * 0.37 + overflow * j * 0.6,
           0.03 + row * 0.012,
-          0.4 + Math.min(row, 2) * 0.58,
+          0.4 + Math.min(row, 2) * 0.58 + overflow * j * 0.6,
         ),
-        quatFlatUp(jitterOf(card.id)),
+        quatFlatUp(j),
         { scale: 0.7, spawn: i >= this.prevDiscardLen ? actorSpawn : undefined },
       );
     });
