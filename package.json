@@ -14,7 +14,8 @@
     "dev": "concurrently -n server,client -c blue,green \"npm run dev:server\" \"npm run dev:client\"",
     "slice": "node scripts/slice.mjs",
     "audio": "node scripts/audio.mjs",
-    "build": "npm run slice && npm run audio && npm run build --workspace client",
+    "money": "node scripts/money.mjs",
+    "build": "npm run slice && npm run audio && npm run money && npm run build --workspace client",
     "start": "npm start --workspace server",
     "test": "npm run test --workspace server"
   },
