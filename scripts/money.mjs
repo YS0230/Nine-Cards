@@ -9,7 +9,8 @@ const SRC = join(ROOT, 'images');
 const OUT = join(ROOT, 'client', 'public', 'money');
 
 await mkdir(OUT, { recursive: true });
-const files = (await readdir(SRC)).filter((f) => f.endsWith('.png'));
+// 只挑面額圖（純數字檔名），避免連同 images/ 下其他用途的圖檔（如玩家人形立牌）一併複製
+const files = (await readdir(SRC)).filter((f) => /^\d+\.png$/.test(f));
 for (const f of files) {
   await copyFile(join(SRC, f), join(OUT, f));
 }

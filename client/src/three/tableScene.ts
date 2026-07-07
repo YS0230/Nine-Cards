@@ -46,6 +46,20 @@ const MONEY_ANCHOR: Record<'top' | 'left' | 'right', THREE.Vector3> = {
 };
 const MY_MONEY_ANCHOR = new THREE.Vector3(0, 0, 5.5);
 
+// 玩家人形立牌：貼在各對手座位外緣的看板（billboard，永遠面向鏡頭），純裝飾用。
+// 3 張圖對應最多 3 個對手方位（top/left/right，四人局才會三個同時出現）
+const STANDEE_H = 2.6;
+const STANDEE_ZONE_IMG: Record<'top' | 'left' | 'right', string> = {
+  top: 'dishen',
+  left: 'dixia',
+  right: 'disheng',
+};
+const STANDEE_ZONE_POS: Record<'top' | 'left' | 'right', THREE.Vector3> = {
+  top: new THREE.Vector3(0, 0, -6.6),
+  left: new THREE.Vector3(-5.3, 0, 0),
+  right: new THREE.Vector3(5.3, 0, 0),
+};
+
 const BILL_W = 1.0;
 const BILL_H = BILL_W * 0.45; // 鈔票素材長寬比約略相同，統一比例
 const COIN_R = 0.09; // 面積約為紙鈔（BILL_W×BILL_H）的 1/18
@@ -93,6 +107,11 @@ interface MoneyNode {
   denom: number;
   targetPos: THREE.Vector3;
   targetQuat: THREE.Quaternion;
+}
+
+interface StandeeNode {
+  sprite: THREE.Sprite;
+  mat: THREE.SpriteMaterial;
 }
 
 // 一張牌的顯示目標
@@ -164,6 +183,10 @@ export class TableScene {
   private coinGeo = new THREE.CircleGeometry(COIN_R, 28);
   private moneyTextures = new Map<number, THREE.Texture>();
   private moneyNodes = new Map<string, MoneyNode>();
+
+  // 玩家人形立牌：依對手方位（top/left/right）站在桌緣的看板
+  private standeeTextures = new Map<string, THREE.Texture>();
+  private standeeNodes = new Map<string, StandeeNode>();
   private everSynced = false; // 首次同步不做飛牌動畫（重連/切回 3D 直接就定位）
   private prevDiscardLen = 0; // 上次同步的棄牌數：判斷哪些是「剛打出」的牌
   private prevActorSeat: number | null = null; // 上次同步時最可能出牌的座位（吃牌者＞行動者）
@@ -274,6 +297,8 @@ export class TableScene {
     this.coinGeo.dispose();
     for (const t of this.moneyTextures.values()) t.dispose();
     for (const n of this.moneyNodes.values()) n.mat.dispose();
+    for (const t of this.standeeTextures.values()) t.dispose();
+    for (const n of this.standeeNodes.values()) n.mat.dispose();
   }
 
   private resize() {
@@ -359,6 +384,9 @@ export class TableScene {
 
     // 各家剩餘金額：直接堆在桌面上（紙幣可重疊、錢幣疊在最上方）
     this.syncMoneyNodes(this.computeMoneyTargets(input.g));
+
+    // 玩家人形立牌：依對手方位站在桌緣
+    this.syncStandees(input.g);
 
     // 供下次同步判斷「剛打出的牌從誰那邊飛出」
     this.everSynced = true;
@@ -687,6 +715,55 @@ export class TableScene {
       node.mat.dispose();
       this.moneyNodes.delete(key);
     }
+  }
+
+  // 玩家人形立牌：哪個對手方位（top/left/right）目前有人坐，就在該方位放一張看板；
+  // 空位（例如三人局沒有 top）則移除。永遠面向鏡頭（Sprite），不需要每幀更新朝向
+  private syncStandees(g: PersonalGameState) {
+    const mySeat = g.you.seat;
+    const seatCount = g.players.length;
+    const turnDist = (seat: number) => (mySeat - seat + seatCount) % seatCount;
+    const occupied = new Set<'top' | 'left' | 'right'>();
+    for (const p of g.players) {
+      if (p.seat === mySeat) continue;
+      occupied.add(this.zoneOf(turnDist(p.seat), seatCount));
+    }
+    for (const zone of ['top', 'left', 'right'] as const) {
+      const key = `standee:${zone}`;
+      if (!occupied.has(zone)) {
+        const node = this.standeeNodes.get(key);
+        if (node) {
+          this.scene.remove(node.sprite);
+          node.mat.dispose();
+          this.standeeNodes.delete(key);
+        }
+        continue;
+      }
+      if (this.standeeNodes.has(key)) continue;
+      const mat = new THREE.SpriteMaterial({ map: this.standeeTexture(zone), transparent: true });
+      const sprite = new THREE.Sprite(mat);
+      sprite.center.set(0.5, 0); // 錨點在底部中心＝站在桌緣（position.y=0 即貼地）
+      sprite.scale.set(STANDEE_H * 0.5, STANDEE_H, 1); // 貼圖載入前的暫定寬高比，載入後於 standeeTexture 內校正
+      sprite.position.copy(STANDEE_ZONE_POS[zone]);
+      this.scene.add(sprite);
+      this.standeeNodes.set(key, { sprite, mat });
+    }
+  }
+
+  private standeeTexture(zone: 'top' | 'left' | 'right'): THREE.Texture {
+    const name = STANDEE_ZONE_IMG[zone];
+    let tex = this.standeeTextures.get(name);
+    if (!tex) {
+      tex = this.loader.load(`/players/${name}.png`, (loaded) => {
+        const img = loaded.image as { width: number; height: number };
+        const aspect = img.width / img.height;
+        const node = this.standeeNodes.get(`standee:${zone}`);
+        node?.sprite.scale.set(STANDEE_H * aspect, STANDEE_H, 1);
+      });
+      tex.colorSpace = THREE.SRGBColorSpace;
+      this.standeeTextures.set(name, tex);
+    }
+    return tex;
   }
 
   // ── 每幀：位置/朝向插值＋光圈脈動 ─────────────────────────

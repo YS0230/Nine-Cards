@@ -15,7 +15,8 @@
     "slice": "node scripts/slice.mjs",
     "audio": "node scripts/audio.mjs",
     "money": "node scripts/money.mjs",
-    "build": "npm run slice && npm run audio && npm run money && npm run build --workspace client",
+    "players": "node scripts/players.mjs",
+    "build": "npm run slice && npm run audio && npm run money && npm run players && npm run build --workspace client",
     "start": "npm start --workspace server",
     "test": "npm run test --workspace server"
   },
