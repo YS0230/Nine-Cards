@@ -153,6 +153,21 @@ export function Table({ api }: { api: GameApi }) {
     return () => window.clearTimeout(timer.current);
   }, [g]);
 
+  // 輪到你浮層提示：輪到你且尚未摸牌時，等 1 秒還沒摸才顯示；摸完牌（canDraw 變 false）就收起
+  const [showTurnBanner, setShowTurnBanner] = useState(false);
+  const turnStartRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (myTurn && canDraw) {
+      const t = window.setTimeout(() => {
+        turnStartRef.current = Date.now();
+        setShowTurnBanner(true);
+      }, 1000);
+      return () => window.clearTimeout(t);
+    }
+    setShowTurnBanner(false);
+    turnStartRef.current = null;
+  }, [myTurn, canDraw]);
+
   const discard = () => {
     if (selected) {
       api.act('discard', selected);
@@ -209,6 +224,8 @@ export function Table({ api }: { api: GameApi }) {
           離開
         </button>
       </header>
+
+      {showTurnBanner && turnStartRef.current != null && <TurnBanner startedAt={turnStartRef.current} />}
 
       {view3d ? (
         /* 3D 牌桌（three.js）：手牌/對手/棄牌/牌堆全在場景內，點牌選牌 */
@@ -752,6 +769,27 @@ function RoundResult({
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// 輪到你浮層提示：彈跳動畫 + 隨經過時間慢慢放大（有上限，避免無限長大跑版）
+function TurnBanner({ startedAt }: { startedAt: number }) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    let raf = 0;
+    const tick = () => {
+      setNow(Date.now());
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+  const elapsed = (now - startedAt) / 1000;
+  const scale = Math.min(1.6, 1 + elapsed * 0.04);
+  return (
+    <div className="turn-banner" style={{ transform: `translate(-50%, -50%) scale(${scale})` }}>
+      輪到你了！
     </div>
   );
 }
