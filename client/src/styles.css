@@ -243,16 +243,23 @@ body {
 }
 .table-top {
   display: flex;
-  gap: 8px;
-  padding: 8px 10px;
-  flex-wrap: wrap;
+  gap: 4px;
+  padding: 8px 8px;
+  flex-wrap: nowrap; /* 玩家資訊固定一列：chip 縮小、輪到誰過長以…截斷 */
+  align-items: center;
   flex: 0 0 auto;
 }
 .chip {
   background: rgba(0, 0, 0, 0.3);
   border-radius: 999px;
-  padding: 6px 12px;
-  font-size: 13px;
+  padding: 5px 8px;
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+.table-top .chip.turn {
+  max-width: 96px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .chip.turn.me {
   background: var(--gold);

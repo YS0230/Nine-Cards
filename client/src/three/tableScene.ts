@@ -28,10 +28,11 @@ const CARD_D = 0.05;
 
 // 各區域座標（桌面 y=0，+z 朝向自己）
 const MY_HAND_Z = 3.95;
-const MY_PUBLIC_Z = 2.55; // 我的公開區（吃牌對子＋死牌）
+const MY_PUBLIC_Z = 2.7; // 我的公開區（吃牌對子＋死牌）
 const OPP_TOP = { hand: -4.35, pub: -3.1 };
-const OPP_SIDE = { hand: 3.2, pub: 2.35 };
-const DECK_POS = new THREE.Vector3(-2.75, 0, 0.35);
+// 側邊暗牌橫向（長軸朝畫面外）刻意出血到視野邊緣，只需看得出餘牌數
+const OPP_SIDE = { hand: 3.7, pub: 2.35 };
+const DECK_POS = new THREE.Vector3(0, 0, -1.35); // 牌堆：桌面中央偏遠側，橫放堆疊
 const CLAIM_POS = new THREE.Vector3(0, 1.28, 0.55);
 
 // 一張牌的顯示目標
@@ -41,6 +42,7 @@ interface CardTarget {
   pos: THREE.Vector3;
   quat: THREE.Quaternion;
   scale: number; // 棄牌縮小以容納更多張
+  spawn?: THREE.Vector3; // 新 mesh 的起點（出牌從出牌者方位飛入；未指定＝牌堆）
   pickable: boolean;
   isPass: boolean;
   selected: boolean;
@@ -87,6 +89,9 @@ export class TableScene {
   private nodes = new Map<string, CardNode>();
   private textures = new Map<string, THREE.Texture>();
   private loader = new THREE.TextureLoader();
+  private everSynced = false; // 首次同步不做飛牌動畫（重連/切回 3D 直接就定位）
+  private prevDiscardLen = 0; // 上次同步的棄牌數：判斷哪些是「剛打出」的牌
+  private prevActorSeat: number | null = null; // 上次同步時最可能出牌的座位（吃牌者＞行動者）
 
   // 對手名牌（Sprite）：seat → { sprite, key }，key 變了才重畫 canvas
   private labels = new Map<number, { sprite: THREE.Sprite; key: string }>();
@@ -142,8 +147,10 @@ export class TableScene {
         opacity: 0.7,
         side: THREE.DoubleSide,
         depthWrite: false,
+        depthTest: false, // 待吃牌下方現在是棄牌區，光圈直接疊在牌上顯示
       }),
     );
+    this.claimRing.renderOrder = 500;
     this.claimRing.rotation.x = -Math.PI / 2;
     this.claimRing.visible = false;
     this.scene.add(this.claimRing);
@@ -201,8 +208,12 @@ export class TableScene {
         const faceMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
         const mats = [this.sideMat, this.sideMat, this.sideMat, this.sideMat, faceMat, this.backMat];
         const mesh = new THREE.Mesh(this.cardGeo, mats);
-        // 新牌從牌堆位置出現，滑到目標處（發牌感）
-        mesh.position.copy(DECK_POS).setY(0.4);
+        // 新牌起點：出牌者方位（target.spawn）＞牌堆（發牌感）；
+        // 首次同步（重連/切回 3D）直接放在定位，不做整桌飛牌動畫
+        const spawn = this.everSynced
+          ? (t.spawn ?? new THREE.Vector3(DECK_POS.x, 0.4, DECK_POS.z))
+          : t.pos;
+        mesh.position.copy(spawn);
         mesh.quaternion.copy(quatFlatDown());
         this.scene.add(mesh);
         node = {
@@ -243,6 +254,19 @@ export class TableScene {
     // 光圈：有待吃牌時顯示在其正下方
     this.claimRing.visible = !!input.g.pendingClaim;
     this.claimRing.position.set(CLAIM_POS.x, 0.02, CLAIM_POS.z);
+
+    // 供下次同步判斷「剛打出的牌從誰那邊飛出」
+    this.everSynced = true;
+    this.prevDiscardLen = input.g.discardPile.length;
+    this.prevActorSeat = input.g.eating?.seat ?? input.g.currentTurnSeat;
+  }
+
+  // 各座位的「出牌起點」：牌從該玩家的方位飛向桌面
+  private seatSpawn(seat: number, mySeat: number, seatCount: number): THREE.Vector3 {
+    if (seat === mySeat) return new THREE.Vector3(0, 0.9, 3.7);
+    const zone = this.zoneOf((mySeat - seat + seatCount) % seatCount, seatCount);
+    if (zone === 'top') return new THREE.Vector3(0, 0.5, -4.4);
+    return new THREE.Vector3(zone === 'left' ? -4.2 : 4.2, 0.5, 0);
   }
 
   // ── 佈局：把遊戲狀態轉成每張牌的目標位置 ──────────────────────
@@ -258,7 +282,7 @@ export class TableScene {
       card: CardT | null,
       pos: THREE.Vector3,
       quat: THREE.Quaternion,
-      opts: Partial<Pick<CardTarget, 'pickable' | 'isPass' | 'selected' | 'scale'>> = {},
+      opts: Partial<Pick<CardTarget, 'pickable' | 'isPass' | 'selected' | 'scale' | 'spawn'>> = {},
     ) =>
       out.push({
         key,
@@ -266,6 +290,7 @@ export class TableScene {
         pos,
         quat,
         scale: opts.scale ?? 1,
+        spawn: opts.spawn,
         pickable: opts.pickable ?? false,
         isPass: opts.isPass ?? false,
         selected: opts.selected ?? false,
@@ -275,19 +300,25 @@ export class TableScene {
     const claimId = g.pendingClaim?.card.id ?? null;
     const eatingId = g.eating?.card.id ?? null;
 
-    // 牌堆：畫成一疊牌背（最多 8 張示意）
-    const deckShown = Math.min(g.deckCount, 8);
+    // 牌堆：橫放（長軸沿 x）攤塌在桌面中央——像倒下的牌疊由遠而近鱗片式平攤，
+    // 一張疊一張瀉向玩家方向；張數與剩餘量成正比，抽牌後攤疊逐漸縮短塌平
+    const deckShown = Math.min(14, g.deckCount > 0 ? Math.max(1, Math.round(g.deckCount / 7)) : 0);
     for (let i = 0; i < deckShown; i++) {
-      push(
-        `deck:${i}`,
-        null,
-        new THREE.Vector3(DECK_POS.x, CARD_D / 2 + i * CARD_D, DECK_POS.z),
-        quatFlatDown(0.06 * ((i % 3) - 1)),
+      const pos = new THREE.Vector3(
+        DECK_POS.x + (i % 2 ? 0.045 : -0.045), // 微錯位，看起來是自然倒塌
+        0.03 + i * 0.012,
+        -1.95 + i * 0.15,
       );
+      push(`deck:${i}`, null, pos, quatFlatDown(Math.PI / 2 + 0.05 * ((i % 3) - 1)), {
+        spawn: pos,
+      });
     }
 
-    // 棄牌區：中央網格（縮小 0.7、每列 10 張，由遠而近；平放面朝上）。
-    // 超過 6 列的極端情況疊在最後一列上（y 遞增讓新牌在上），避免蔓延到我的區域
+    // 棄牌區：牌堆攤疊前方的網格（縮小 0.7、每列 10 張，由遠而近；平放面朝上）。
+    // 超過 3 列的極端情況疊在最後一列上（y 遞增讓新牌在上），避免蔓延到我的區域。
+    // 剛打出的牌（index ≥ 上次棄牌數）從出牌者方位飛入
+    const actorSpawn =
+      this.prevActorSeat != null ? this.seatSpawn(this.prevActorSeat, mySeat, seatCount) : undefined;
     g.discardPile.forEach((card, i) => {
       if (card.id === claimId || card.id === eatingId) return;
       const col = i % 10;
@@ -298,18 +329,19 @@ export class TableScene {
         new THREE.Vector3(
           -1.67 + col * 0.37,
           0.03 + row * 0.012,
-          -1.9 + Math.min(row, 6) * 0.6,
+          0.4 + Math.min(row, 2) * 0.58,
         ),
         quatFlatUp(jitterOf(card.id)),
-        { scale: 0.7 },
+        { scale: 0.7, spawn: i >= this.prevDiscardLen ? actorSpawn : undefined },
       );
     });
 
-    // 待吃/自摸保護中的牌：懸浮在中央、面向自己
+    // 待吃/自摸保護中的牌：懸浮在中央、面向自己；從打出它的玩家方位飛入
     if (g.pendingClaim) {
       push(`c:${g.pendingClaim.card.id}`, g.pendingClaim.card, CLAIM_POS.clone(), quatFacingMe(), {
         pickable: canPass,
         isPass: canPass,
+        spawn: this.seatSpawn(g.pendingClaim.fromSeat, mySeat, seatCount),
       });
     }
 
@@ -332,11 +364,12 @@ export class TableScene {
       .filter((c): c is CardT => !!c);
     const myHand = g.you.hand.filter((c) => !deadIdSet.has(c.id));
 
-    // 公開區：吃牌對子（兩張略疊）＋死牌單張，靠左往右排
+    // 公開區：吃牌對子（兩張略疊）＋死牌單張，靠左往右排；新牌從我的手牌處滑出
+    const mySpawn = this.seatSpawn(mySeat, mySeat, seatCount);
     let px = -3.0;
     for (const [i, pair] of g.you.melds.entries()) {
       for (const [j, card] of pair.entries()) {
-        push(`c:${card.id}`, card, new THREE.Vector3(px + j * 0.44, 0.03, MY_PUBLIC_Z), quatFlatUp(0.03 * (i % 2 ? 1 : -1)));
+        push(`c:${card.id}`, card, new THREE.Vector3(px + j * 0.44, 0.03, MY_PUBLIC_Z), quatFlatUp(0.03 * (i % 2 ? 1 : -1)), { spawn: mySpawn });
       }
       px += 0.44 + 0.68;
     }
@@ -345,6 +378,7 @@ export class TableScene {
       push(`c:${card.id}`, card, new THREE.Vector3(px, 0.03, MY_PUBLIC_Z), quatFlatUp(jitterOf(card.id)), {
         pickable: pickableIds.has(card.id),
         selected: selectedId === card.id,
+        spawn: mySpawn,
       });
       px += 0.68;
     }
@@ -368,7 +402,7 @@ export class TableScene {
     for (const p of g.players) {
       if (p.seat === mySeat) continue;
       const zone = this.zoneOf(turnDist(p.seat), seatCount);
-      this.layoutOpponent(p, zone, eatingId, push);
+      this.layoutOpponent(p, zone, eatingId, this.seatSpawn(p.seat, mySeat, seatCount), push);
     }
 
     return out;
@@ -393,7 +427,14 @@ export class TableScene {
     p: PublicPlayer,
     zone: 'left' | 'right' | 'top',
     eatingId: string | null,
-    push: (key: string, card: CardT | null, pos: THREE.Vector3, quat: THREE.Quaternion) => void,
+    spawn: THREE.Vector3,
+    push: (
+      key: string,
+      card: CardT | null,
+      pos: THREE.Vector3,
+      quat: THREE.Quaternion,
+      opts?: { spawn?: THREE.Vector3 },
+    ) => void,
   ) {
     // 沿著該側的排列方向：top 沿 x、side 沿 z
     const place = (offset: number, line: 'hand' | 'pub'): THREE.Vector3 => {
@@ -404,18 +445,16 @@ export class TableScene {
     };
     const spin = zone === 'top' ? 0 : zone === 'left' ? -Math.PI / 2 : Math.PI / 2;
 
-    // 暗牌置中排開。側邊座位牌長軸沿縱向、鱗片式相疊（間距小於牌長），
-    // 避免橫放時超出直式手機的視野；逐張墊高防止 z-fighting
+    // 暗牌置中排開。側邊座位橫放（長軸朝畫面外），外側牌身隱沒在視野邊緣，
+    // 只需看得出剩幾張
     const hn = p.handCount;
-    const hStep = zone === 'top' ? 0.44 : 0.5;
+    const hStep = zone === 'top' ? 0.44 : 0.42;
     const h0 = -((hn - 1) * hStep) / 2;
     for (let i = 0; i < hn; i++) {
-      const pos = place(h0 + i * hStep, 'hand');
-      if (zone !== 'top') pos.y += i * 0.008;
-      push(`h${p.seat}:${i}`, null, pos, quatFlatDown(jitterOf(`${p.seat}:${i}`) * 0.2));
+      push(`h${p.seat}:${i}`, null, place(h0 + i * hStep, 'hand'), quatFlatDown(spin + jitterOf(`${p.seat}:${i}`) * 0.2));
     }
 
-    // 公開區：由中心往外排
+    // 公開區：由中心往外排；剛吃進的牌從該玩家方位滑入
     const pubCards: { card: CardT; group: number }[] = [];
     p.melds.forEach((pair, gi) => pair.forEach((c) => pubCards.push({ card: c, group: gi })));
     p.deadCards.forEach((c, di) => pubCards.push({ card: c, group: 100 + di }));
@@ -426,7 +465,7 @@ export class TableScene {
       if (card.id === eatingId) continue;
       if (lastGroup !== -1 && group !== lastGroup) off += 0.2; // 組間留空隙
       lastGroup = group;
-      push(`c:${card.id}`, card, place(off, 'pub'), quatFlatUp(spin + jitterOf(card.id)));
+      push(`c:${card.id}`, card, place(off, 'pub'), quatFlatUp(spin + jitterOf(card.id)), { spawn });
       off += 0.46;
     }
   }
@@ -474,12 +513,13 @@ export class TableScene {
         entry.sprite.material.needsUpdate = true;
         entry.sprite.scale.set(0.62 * aspect, 0.62, 1);
       }
-      // 名牌位置：對家在正上方；側邊座位放在該側上方偏內，避免超出直式視野
+      // 名牌位置：拉高放到牌組後方的桌沿，不擋住對家的牌；
+      // 側邊座位放在該側上方偏內，避免超出直式視野
       const zone = this.zoneOf(turnDist(p.seat), seatCount);
       entry.sprite.position.set(
         zone === 'top' ? 0 : zone === 'left' ? -2.0 : 2.0,
-        1.15,
-        zone === 'top' ? -4.9 : -3.5,
+        zone === 'top' ? 2.4 : 1.9,
+        zone === 'top' ? -5.5 : -4.1,
       );
     }
     for (const [seat, entry] of this.labels) {
@@ -538,18 +578,18 @@ export class TableScene {
   }
 }
 
-// 牌背貼圖：深紅底＋框線＋菱格紋（一次生成共用）
+// 牌背貼圖：淺綠底＋深綠框線＋菱格紋（一次生成共用）
 function makeBackTexture(): THREE.CanvasTexture {
   const c = document.createElement('canvas');
   c.width = 96;
   c.height = 344;
   const ctx = c.getContext('2d')!;
-  ctx.fillStyle = '#8e2f2b';
+  ctx.fillStyle = '#c8e4bc';
   ctx.fillRect(0, 0, c.width, c.height);
-  ctx.strokeStyle = 'rgba(255,220,160,0.85)';
+  ctx.strokeStyle = 'rgba(43,105,66,0.9)';
   ctx.lineWidth = 4;
   ctx.strokeRect(7, 7, c.width - 14, c.height - 14);
-  ctx.strokeStyle = 'rgba(255,220,160,0.25)';
+  ctx.strokeStyle = 'rgba(43,105,66,0.28)';
   ctx.lineWidth = 2;
   for (let y = -c.width; y < c.height + c.width; y += 22) {
     ctx.beginPath();
