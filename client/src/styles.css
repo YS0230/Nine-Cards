@@ -1105,10 +1105,47 @@ body {
   height: 100%;
   touch-action: manipulation; /* 快速點按不觸發雙擊縮放 */
 }
+/* 對手資訊：固定 HTML 疊層（不隨 3D 鏡頭透視變化），貼在畫面邊緣 */
+.s3-badges {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+}
+.s3-badge {
+  position: absolute;
+  top: 8px;
+  display: flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.55);
+  border: 2px solid transparent;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  max-width: calc(50% - 16px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.s3-badge.active {
+  border-color: var(--gold);
+}
+.s3-badge-top {
+  left: 50%;
+  transform: translateX(-50%);
+}
+.s3-badge-left {
+  left: 8px;
+}
+.s3-badge-right {
+  right: 8px;
+}
+
 /* 待吃牌／吃牌中：文字說明與倒數條疊在場景上緣 */
 .s3-offer {
   position: absolute;
-  top: 8px;
+  top: 46px;
   left: 50%;
   transform: translateX(-50%);
   max-width: calc(100% - 24px);

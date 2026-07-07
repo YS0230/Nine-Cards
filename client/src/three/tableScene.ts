@@ -93,8 +93,6 @@ export class TableScene {
   private prevDiscardLen = 0; // 上次同步的棄牌數：判斷哪些是「剛打出」的牌
   private prevActorSeat: number | null = null; // 上次同步時最可能出牌的座位（吃牌者＞行動者）
 
-  // 對手名牌（Sprite）：seat → { sprite, key }，key 變了才重畫 canvas
-  private labels = new Map<number, { sprite: THREE.Sprite; key: string }>();
   // 待吃牌底下的光圈（提示可互動／倒數中）
   private claimRing: THREE.Mesh;
 
@@ -179,7 +177,6 @@ export class TableScene {
     this.cardGeo.dispose();
     for (const t of this.textures.values()) t.dispose();
     for (const n of this.nodes.values()) n.faceMat.dispose();
-    for (const l of this.labels.values()) l.sprite.material.map?.dispose();
   }
 
   private resize() {
@@ -250,7 +247,6 @@ export class TableScene {
       this.nodes.delete(key);
     }
 
-    this.syncLabels(input.g);
     // 光圈：有待吃牌時顯示在其正下方
     this.claimRing.visible = !!input.g.pendingClaim;
     this.claimRing.position.set(CLAIM_POS.x, 0.02, CLAIM_POS.z);
@@ -472,66 +468,6 @@ export class TableScene {
     }
   }
 
-  // ── 對手名牌（Sprite）──────────────────────────────────────
-  private syncLabels(g: PersonalGameState) {
-    const mySeat = g.you.seat;
-    const seatCount = g.players.length;
-    const turnDist = (seat: number) => (mySeat - seat + seatCount) % seatCount;
-    const relationOf = (seat: number) => {
-      if (seatCount === 2) return '對家';
-      const d = turnDist(seat);
-      return d === 1 ? '下家' : d === seatCount - 1 ? '上家' : '對家';
-    };
-    const seen = new Set<number>();
-    for (const p of g.players) {
-      if (p.seat === mySeat) continue;
-      seen.add(p.seat);
-      const active = p.seat === g.currentTurnSeat;
-      const badges = [
-        p.isDealer ? '莊' : '',
-        p.isTenpai ? '聽' : '',
-        p.isXianggong ? '相公' : '',
-        !p.connected ? '斷線' : '',
-      ]
-        .filter(Boolean)
-        .join('·');
-      const text = `${relationOf(p.seat)} ${p.name}　${p.score}頭${badges ? '　' + badges : ''}`;
-      const key = `${text}|${active}`;
-      let entry = this.labels.get(p.seat);
-      if (!entry) {
-        const sprite = new THREE.Sprite(
-          new THREE.SpriteMaterial({ transparent: true, depthTest: false }),
-        );
-        sprite.renderOrder = 999;
-        this.scene.add(sprite);
-        entry = { sprite, key: '' };
-        this.labels.set(p.seat, entry);
-      }
-      if (entry.key !== key) {
-        entry.key = key;
-        entry.sprite.material.map?.dispose();
-        const { texture, aspect } = makeLabelTexture(text, active);
-        entry.sprite.material.map = texture;
-        entry.sprite.material.needsUpdate = true;
-        entry.sprite.scale.set(0.62 * aspect, 0.62, 1);
-      }
-      // 名牌位置：拉高放到牌組後方的桌沿，不擋住對家的牌；
-      // 側邊座位放在該側上方偏內，避免超出直式視野
-      const zone = this.zoneOf(turnDist(p.seat), seatCount);
-      entry.sprite.position.set(
-        zone === 'top' ? 0 : zone === 'left' ? -2.0 : 2.0,
-        zone === 'top' ? 2.4 : 1.9,
-        zone === 'top' ? -5.5 : -4.1,
-      );
-    }
-    for (const [seat, entry] of this.labels) {
-      if (seen.has(seat)) continue;
-      entry.sprite.material.map?.dispose();
-      this.scene.remove(entry.sprite);
-      this.labels.delete(seat);
-    }
-  }
-
   // ── 每幀：位置/朝向插值＋光圈脈動 ─────────────────────────
   private tick() {
     const dt = Math.min(this.clock.getDelta(), 0.1);
@@ -606,32 +542,3 @@ function makeBackTexture(): THREE.CanvasTexture {
   return tex;
 }
 
-// 對手名牌貼圖：半透明圓角底＋文字；輪到該玩家時金框高亮
-function makeLabelTexture(text: string, active: boolean): { texture: THREE.CanvasTexture; aspect: number } {
-  const font = '600 30px system-ui, sans-serif';
-  const measure = document.createElement('canvas').getContext('2d')!;
-  measure.font = font;
-  const w = Math.ceil(measure.measureText(text).width) + 44;
-  const h = 60;
-  const c = document.createElement('canvas');
-  c.width = w;
-  c.height = h;
-  const ctx = c.getContext('2d')!;
-  ctx.fillStyle = active ? 'rgba(120,86,0,0.85)' : 'rgba(0,0,0,0.55)';
-  ctx.beginPath();
-  ctx.roundRect(2, 2, w - 4, h - 4, 14);
-  ctx.fill();
-  if (active) {
-    ctx.strokeStyle = '#ffd24a';
-    ctx.lineWidth = 4;
-    ctx.stroke();
-  }
-  ctx.font = font;
-  ctx.fillStyle = '#fff';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(text, w / 2, h / 2 + 1);
-  const texture = new THREE.CanvasTexture(c);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  return { texture, aspect: w / h };
-}

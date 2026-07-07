@@ -62,6 +62,14 @@ export function Table({ api }: { api: GameApi }) {
     if (d === seatCount - 1) return '上家';
     return '對家';
   };
+  // 3D 牌桌對手資訊疊層：固定貼在畫面邊緣（下家右／上家左／對家上），不隨鏡頭位置變化
+  const zoneOf = (seat: number): 'left' | 'right' | 'top' => {
+    if (seatCount === 2) return 'top';
+    const d = turnDist(seat);
+    if (d === 1) return 'right';
+    if (d === seatCount - 1) return 'left';
+    return 'top';
+  };
   // 新手提示關閉：吃/胡按鈕不自動鎖定（相公、對局結束除外），按下後由伺服器判定
   const eatEnabled = g.hints ? canEat : !myXianggong && g.phase === 'PLAYING';
   const winEnabled = g.hints ? canWin : !myXianggong && g.phase === 'PLAYING';
@@ -238,6 +246,25 @@ export function Table({ api }: { api: GameApi }) {
             onPick={setSelected}
             onPass={() => api.act('pass')}
           />
+          {/* 對手資訊：固定 HTML 疊層，貼在畫面邊緣，不隨 3D 鏡頭透視變化 */}
+          <div className="s3-badges">
+            {opponents.map((p) => (
+              <div
+                key={p.id}
+                className={`s3-badge s3-badge-${zoneOf(p.seat)} ${
+                  p.seat === g.currentTurnSeat ? 'active' : ''
+                }`}
+              >
+                <span className="rel-badge">{relationOf(p.seat)}</span>
+                {p.isDealer && '👑 '}
+                {p.name}
+                {p.isTenpai && <span className="tenpai-badge">聽</span>}
+                {p.isXianggong && <span className="xg-badge">相公</span>}
+                <span className="opp-score">{p.score} 頭</span>
+                {!p.connected && ' 📴'}
+              </div>
+            ))}
+          </div>
           {/* 待吃牌／吃牌中：文字說明與倒數條用 DOM 疊在場景上方 */}
           {g.pendingClaim && (
             <div className={`s3-offer ${canPass ? 'selfeat' : ''}`}>
