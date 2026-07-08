@@ -68,7 +68,7 @@ describe('新手提示（建房選項）', () => {
     eng.claimEndsAt = 0;
     expect(eng.apply('2', 'draw').ok).toBe(true);
     expect(eng.discardPile.map((x) => x.id)).toContain('黃_帥_1');
-    // 沒人被判相公（claimOrder 為空，無逾時未吃者）
+    // 沒人被判相公（雙方手上都沒有黃帥，落桌後配不到）
     expect(eng.xianggong.every((x) => !x)).toBe(true);
   });
 

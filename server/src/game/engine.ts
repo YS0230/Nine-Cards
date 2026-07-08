@@ -137,7 +137,7 @@ export class GameEngine {
   claimEndsAt = 0; // 下一家可摸牌的時間點（epoch ms）
   protectedSelfEat = false; // 自摸優先保護：摸牌者可胡自己的牌（最高優先），或可吃且無他家能胡 → 不限時、下家不能先摸
   tenpai: boolean[] = []; // 各座位是否聽牌（進入聽牌時宣告一次，§7）
-  xianggong: boolean[] = []; // 相公：吃牌優先權最高卻逾時未吃 → 本局僅能觀看、不能做任何動作
+  xianggong: boolean[] = []; // 相公：棄牌落桌時手上暗牌仍可與之配對卻未吃走 → 本局僅能觀看、不能做任何動作
 
   // 胡牌後手動抽五隻（§9.2）
   drawFive: DrawFiveState | null = null; // 進行中的抽五隻（DRAW_FIVE 階段）
@@ -499,9 +499,9 @@ export class GameEngine {
     if (this.stage === 'DEAL_DRAW') return this.doDealerDraw(p); // 決定莊家的抽牌（§4.1）
     // 下一家在兩秒後摸牌 → 關閉吃牌窗（沒按吃者當過牌），原牌落桌
     if (this.stage === 'CLAIM') {
-      this.markClaimTimeout(p.seat); // 優先權最高卻逾時未吃者 → 相公
       this.clearClaim();
       this.resolveNoClaim();
+      if (this.phase === 'FINISHED') return { ok: true }; // 全員相公 → 本局結束
       if (String(this.stage) !== 'DRAW' || this.turnSeat !== p.seat) return { ok: true };
     }
     if (this.deck.length <= DRAW_GAME_FLOOR) {
@@ -667,23 +667,35 @@ export class GameEngine {
   // 無人宣告 → 待宣告的牌進棄牌區（落在桌面），逆時鐘換下一位摸牌（§6.5/§6.6）
   private resolveNoClaim() {
     if (this.pending) {
-      this.discardPile.push(this.pending.card);
+      const card = this.pending.card;
+      this.discardPile.push(card);
       const from = this.pending.fromSeat;
       this.pending = null;
+      this.markXianggongAgainstDiscard(card);
+      if (this.phase === 'FINISHED') return; // 全員相公 → 本局重新發牌，不必再排下一位
       this.turnSeat = this.nextActiveSeat(from); // 跳過相公
     }
     this.stage = 'DRAW';
   }
 
-  // 吃牌窗逾時被下一家摸牌關閉：優先權最高卻沒宣告的玩家成為相公
-  // （下一家自己就是最高優先者時不算——他是主動選擇摸牌放棄，非逾時）
-  private markClaimTimeout(closerSeat: number) {
-    const top = this.claimOrder[0];
-    if (top === undefined || top === closerSeat) return;
-    this.xianggong[top] = true;
-    this.message =
-      (this.message ? this.message + '｜' : '') +
-      `${this.players[top].name} 逾時未吃，本局相公（僅能觀看）`;
+  // 棄牌落桌後檢查：手上暗牌仍可與這張牌配對卻沒吃走的玩家 → 相公（僅能觀看，本局不能再動作）
+  // 若全員因此都相公、無人能繼續遊戲，比照牌堆不足九支：本局流局、重新發牌（原莊連任）
+  private markXianggongAgainstDiscard(card: Card) {
+    for (const p of this.players) {
+      if (this.xianggong[p.seat]) continue;
+      if (!hasMatch(p.hand, card)) continue;
+      this.xianggong[p.seat] = true;
+      this.message =
+        (this.message ? this.message + '｜' : '') +
+        `${p.name} 手上有 ${card.color}${card.rank} 的配對卻未吃，本局相公（僅能觀看）`;
+    }
+    if (this.xianggong.every(Boolean)) {
+      this.drawGame = true;
+      this.phase = 'FINISHED';
+      this.winnerSeat = null;
+      this.message = (this.message ? this.message + '｜' : '') + '流局（全員相公，本局重新發牌）';
+      this.roundResult = this.buildDrawResult();
+    }
   }
 
   private win(seat: number, label: string, ctx: WinContext = {}) {
