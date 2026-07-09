@@ -69,14 +69,17 @@ const STANDEE_ZONE_POS: Record<'top' | 'left' | 'right', THREE.Vector3> = {
 };
 // 3d 模型有實際體積（不像去背貼圖是薄薄一片），貼著桌緣站會看起來疊到桌面上，
 // 站位要比 2D 立牌貼圖再往後退一點，才會落在桌子後方而非桌面上方。
-// 上家/下家（左右兩側）實測不需要退這麼多，退太遠會離桌子太遠，故側邊用較小的值。
-const STANDEE_MODEL_EXTRA_BACK = 2.4;
+// 三個方位實測退的距離不同，退太遠會離桌子太遠，故分開調整。
+const STANDEE_MODEL_EXTRA_BACK_TOP = 1.0;
 const STANDEE_MODEL_EXTRA_BACK_SIDE = 1.0;
 // AI 由 2D 圖片生成的模型，正面朝向的本地軸不保證是 -Z（lookAt 假設的方向）；
 // 實測目前會偏向鏡頭右側 90 度，故在正規化時先補一個偏航角修正
 const STANDEE_MODEL_FRONT_OFFSET = -Math.PI / 2;
+// 每幀朝向鏡頭時，垂直方向只取部分高度差（1＝完整朝向鏡頭高度、0＝完全水平），
+// 避免鏡頭仰角大時模型抬頭角度過陡
+const STANDEE_MODEL_PITCH_FACTOR = 0.35;
 const STANDEE_MODEL_ZONE_POS: Record<'top' | 'left' | 'right', THREE.Vector3> = {
-  top: STANDEE_ZONE_POS.top.clone().add(new THREE.Vector3(0, 0, -STANDEE_MODEL_EXTRA_BACK)),
+  top: STANDEE_ZONE_POS.top.clone().add(new THREE.Vector3(0, 0, -STANDEE_MODEL_EXTRA_BACK_TOP)),
   left: STANDEE_ZONE_POS.left.clone().add(new THREE.Vector3(-STANDEE_MODEL_EXTRA_BACK_SIDE, 0, 0)),
   right: STANDEE_ZONE_POS.right.clone().add(new THREE.Vector3(STANDEE_MODEL_EXTRA_BACK_SIDE, 0, 0)),
 };
@@ -1003,10 +1006,18 @@ export class TableScene {
       node.mesh.position.lerp(node.targetPos, a);
       node.mesh.quaternion.slerp(node.targetQuat, a);
     }
-    // 3d 立牌模型不像 Sprite 會自動朝向鏡頭，每幀手動轉向（僅繞 Y 軸偏航角，維持站立不歪斜；
-    // 桌面鏡頭本來就採俯角，站立模型不整個歪頭「盯」鏡頭才自然）。
+    // 3d 立牌模型不像 Sprite 會自動朝向鏡頭，每幀手動轉向鏡頭當前位置，
+    // 鏡頭上下移動時模型也會跟著抬頭/低頭；但完整朝向鏡頭角度太陡（像仰頭盯著看），
+    // 故只取一部分高度差，看起來比較自然、水平一點。
     for (const node of this.standeeNodes.values()) {
-      if (node.kind === 'model') node.object.lookAt(this.camera.position.x, node.object.position.y, this.camera.position.z);
+      if (node.kind !== 'model') continue;
+      const dy = this.camera.position.y - node.object.position.y;
+      const target = new THREE.Vector3(
+        this.camera.position.x,
+        node.object.position.y + dy * STANDEE_MODEL_PITCH_FACTOR,
+        this.camera.position.z,
+      );
+      node.object.lookAt(target);
     }
     if (this.claimRing.visible) {
       const t = this.clock.elapsedTime;
