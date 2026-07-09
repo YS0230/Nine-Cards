@@ -98,6 +98,20 @@ body {
   color: var(--paper);
 }
 
+.field-with-action {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.field-with-action input {
+  flex: 1;
+  min-width: 0;
+}
+.field-with-action .btn {
+  flex: none;
+  white-space: nowrap;
+}
+
 /* ── Lobby ────────────────────────────────────── */
 .lobby,
 .waiting {

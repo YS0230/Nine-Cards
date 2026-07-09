@@ -5,12 +5,40 @@ const urlCode = new URLSearchParams(location.search).get('code')?.toUpperCase() 
 
 type Mode = 'menu' | 'join';
 
+// 首次遊玩、尚未存過暱稱時隨機帶入的趣味暱稱，讓玩家不用自己想名字
+const FUN_NAMES = [
+  '摸牌大師',
+  '天胡本人',
+  '相公專業戶',
+  '吃貨代表',
+  '運氣爆棚',
+  '牌桌千王',
+  '一夜致富',
+  '躺贏選手',
+  '手氣製造機',
+  '出老千的',
+  '胡牌預備軍',
+  '牌運女神',
+  '默默聽牌中',
+  '賭神二代',
+  '摳門莊家',
+  '九支仔王',
+  '開交王',
+];
+
+function randomFunName(exclude?: string) {
+  if (FUN_NAMES.length <= 1) return FUN_NAMES[0];
+  let n = FUN_NAMES[Math.floor(Math.random() * FUN_NAMES.length)];
+  while (n === exclude) n = FUN_NAMES[Math.floor(Math.random() * FUN_NAMES.length)];
+  return n;
+}
+
 export function Lobby({ api }: { api: GameApi }) {
-  const [name, setName] = useState(api.savedName);
+  const [name, setName] = useState(() => api.savedName || randomFunName());
   const [code, setCode] = useState(urlCode);
   const [mode, setMode] = useState<Mode>(urlCode ? 'join' : 'menu');
-  const [hints, setHints] = useState(true); // 建房選項：新手提示（可吃/胡才啟用按鈕）
-  const [claimSeconds, setClaimSeconds] = useState(5); // 建房選項：吃牌窗等待秒數
+  const [hints, setHints] = useState(false); // 建房選項：新手提示（可吃/胡才啟用按鈕）
+  const [claimSeconds, setClaimSeconds] = useState(2); // 建房選項：吃牌窗等待秒數
   const [startingCapital, setStartingCapital] = useState(2000); // 建房選項：本金（每位玩家初始金額）
   const [unitBet, setUnitBet] = useState(50); // 建房選項：一頭金額
 
@@ -33,12 +61,22 @@ export function Lobby({ api }: { api: GameApi }) {
 
       <label className="field">
         <span>暱稱</span>
-        <input
-          value={name}
-          maxLength={12}
-          placeholder="輸入你的暱稱"
-          onChange={(e) => setName(e.target.value)}
-        />
+        <div className="field-with-action">
+          <input
+            value={name}
+            maxLength={12}
+            placeholder="輸入你的暱稱"
+            onChange={(e) => setName(e.target.value)}
+          />
+          <button
+            type="button"
+            className="btn small ghost"
+            title="不喜歡這個暱稱？換一個"
+            onClick={() => setName(randomFunName(name))}
+          >
+            換一個
+          </button>
+        </div>
       </label>
 
       {mode === 'menu' && (
@@ -63,7 +101,7 @@ export function Lobby({ api }: { api: GameApi }) {
                 value={claimSeconds}
                 onChange={(e) => setClaimSeconds(Number(e.target.value))}
               >
-                {[2, 3, 5, 8, 10, 15].map((s) => (
+                {[1, 2, 3, 5, 8, 10, 15].map((s) => (
                   <option key={s} value={s}>
                     {s} 秒
                   </option>
