@@ -79,9 +79,15 @@ export function useGame(): GameApi {
     socket.on('connect', () => {
       setConnected(true);
       const token = localStorage.getItem(LS_TOKEN);
-      if (token) socket.emit(EVT.RESUME, { token }, onJoin);
+      if (token) socket.emit(EVT.RESUME, { token }, onResume);
     });
     socket.on('disconnect', () => setConnected(false));
+
+    // 手機切回瀏覽器時立即檢查連線：背景期間 socket 常被系統中斷，主動重連而不等重試計時器
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && !socket.connected) socket.connect();
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
 
     socket.on(EVT.ROOM_UPDATE, (view: RoomView) => {
       setRoom(view);
@@ -99,6 +105,7 @@ export function useGame(): GameApi {
     socket.on(EVT.LOBBY_UPDATE, (list: LobbyRoom[]) => setLobby(list));
 
     return () => {
+      document.removeEventListener('visibilitychange', onVisibilityChange);
       socket.close();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -108,6 +115,29 @@ export function useGame(): GameApi {
     if (!res.ok || !res.playerId || !res.token || !res.roomId || !res.code) {
       setToast(res.error ?? '加入失敗');
       localStorage.removeItem(LS_TOKEN);
+      return;
+    }
+    localStorage.setItem(LS_TOKEN, res.token);
+    setIdentity({
+      playerId: res.playerId,
+      token: res.token,
+      roomId: res.roomId,
+      code: res.code,
+    });
+  }, []);
+
+  // 斷線重連的恢復結果：失敗代表房間已被回收（逾時／伺服器重啟），
+  // 清掉舊身分並回首頁，避免停留在已過期的房間畫面
+  const onResume = useCallback((res: JoinResult) => {
+    if (!res.ok || !res.playerId || !res.token || !res.roomId || !res.code) {
+      localStorage.removeItem(LS_TOKEN);
+      setIdentity(null);
+      setRoom(null);
+      setGame(null);
+      setGameOver(null);
+      setGameEnded(null);
+      setScreen('home');
+      if (res.error) setToast(res.error);
       return;
     }
     localStorage.setItem(LS_TOKEN, res.token);

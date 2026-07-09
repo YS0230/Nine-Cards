@@ -7,6 +7,8 @@ const MAX_PLAYERS = 4;
 const MIN_PLAYERS = 2;
 const DEFAULT_STARTING_CAPITAL = 2000; // 本金預設值（元）
 const DEFAULT_UNIT_BET = 50; // 一頭預設值（元）
+// 全員離線後房間的保留寬限時間：手機切換 APP／鎖屏造成的短暫斷線，可在此時間內重連回來
+const EMPTY_ROOM_GRACE_MS = Number(process.env.EMPTY_ROOM_GRACE_MS ?? 120_000);
 
 export interface Player {
   id: string;
@@ -37,6 +39,7 @@ export interface Room {
   claimTimer?: ReturnType<typeof setTimeout>;
   scheduledClaimId?: number;
   dealerRevealTimer?: ReturnType<typeof setTimeout>; // 決定莊家展示計時器（§4.1）
+  disposeTimer?: ReturnType<typeof setTimeout>; // 全員離線後的回收寬限計時器
   paused: boolean; // 有玩家斷線 → 全體暫停等待重連（凍結計時器、擋動作）
   pausedAt?: number; // 進入暫停的時間點，重連時據以把凍結的計時器整體後移
   endResult?: GameEndedPayload; // 整場結束（有人離開）的最終計分版（ENDED 階段）
@@ -106,6 +109,7 @@ export class GameServer {
     startingCapital?: number,
     unitBet?: number,
   ): JoinOutcome {
+    this.detachSocket(socketId); // 先清掉同連線的舊身分，避免殘留幽靈玩家
     const id = randomUUID();
     const code = makeCode(new Set(this.codeIndex.keys()));
     const host = this.newPlayer(name, socketId, 0);
@@ -146,6 +150,7 @@ export class GameServer {
   joinByCode(code: string, name: string, socketId: string): JoinOutcome {
     const roomId = this.codeIndex.get(code.toUpperCase().trim());
     if (!roomId) return { ok: false, error: '找不到這個房號' };
+    this.detachSocket(socketId); // 先清掉同連線的舊身分，避免殘留幽靈玩家
     return this.joinRoom(roomId, name, socketId);
   }
 
@@ -161,13 +166,30 @@ export class GameServer {
   }
 
   quickMatch(name: string, socketId: string): JoinOutcome {
-    // 找一個公開、等待中、有空位的房間；沒有就開一個公開房
+    this.detachSocket(socketId); // 先清掉同連線的舊身分，避免殘留幽靈玩家
+    // 找一個公開、等待中、有空位、還有人在線的房間；沒有就開一個公開房
     for (const room of this.rooms.values()) {
-      if (room.isPublic && room.phase === 'WAITING' && room.players.length < MAX_PLAYERS) {
+      if (
+        room.isPublic &&
+        room.phase === 'WAITING' &&
+        room.players.length < MAX_PLAYERS &&
+        room.players.some((p) => p.connected)
+      ) {
         return this.joinRoom(room.id, name, socketId);
       }
     }
     return this.createRoom(name, socketId, true);
+  }
+
+  // 同一條連線若在其他房間仍有身分（例如斷線恢復後的舊畫面又按了建房/加入）→ 視同離開該房，
+  // 否則會留下永遠顯示「在線」的幽靈玩家，讓房間無法被回收
+  private detachSocket(socketId: string) {
+    for (const room of [...this.rooms.values()]) {
+      const p = room.players.find((x) => x.socketId === socketId);
+      if (!p) continue;
+      const r = this.leaveRoom(p.id);
+      if (r) this.broadcast?.(r);
+    }
   }
 
   resume(token: string, socketId: string): JoinOutcome {
@@ -179,6 +201,11 @@ export class GameServer {
     player.socketId = socketId;
     player.connected = true;
     room.engine?.setConnected(player.id, true);
+    // 有人回來了 → 取消全員離線的回收寬限計時器
+    if (room.disposeTimer) {
+      clearTimeout(room.disposeTimer);
+      room.disposeTimer = undefined;
+    }
     // 全員回到線上 → 解除暫停，並把暫停期間凍結的計時器整體後移，繼續牌局
     if (room.paused && room.players.every((p) => p.connected)) this.resumeRoom(room);
     return { ok: true, room, player };
@@ -386,23 +413,32 @@ export class GameServer {
     }, Math.max(0, delay) + 60);
   }
 
-  markDisconnected(socketId: string): Room | undefined {
+  markDisconnected(socketId: string): Room[] {
+    // 同一條連線可能在多個房間留有身分，必須全部處理（漏掉會留下永遠「在線」的幽靈玩家）
+    const affected: Room[] = [];
     for (const room of this.rooms.values()) {
       const player = room.players.find((p) => p.socketId === socketId);
       if (!player) continue;
       player.connected = false;
       player.socketId = null;
       room.engine?.setConnected(player.id, false);
-      // 整桌都離線 → 沒有人可等待重連，直接回收房間（含未開局的等待房）
-      if (room.players.every((p) => !p.connected)) {
-        this.disposeRoom(room);
-        return undefined;
-      }
       // 對局進行中（含單局結算）意外斷線 → 全體暫停，等待該玩家重連
       if (room.phase === 'PLAYING' || room.phase === 'FINISHED') this.pauseRoom(room);
-      return room;
+      // 整桌都離線 → 不立即回收：手機切換 APP／鎖屏常造成短暫斷線，保留寬限時間等人回來
+      if (room.players.every((p) => !p.connected)) this.scheduleDispose(room);
+      affected.push(room);
     }
-    return undefined;
+    return affected;
+  }
+
+  // 全員離線：排一個寬限計時器，時間到仍無人重連才真正回收房間
+  private scheduleDispose(room: Room) {
+    if (room.disposeTimer) return;
+    room.disposeTimer = setTimeout(() => {
+      room.disposeTimer = undefined;
+      const r = this.rooms.get(room.id);
+      if (r && r.players.every((p) => !p.connected)) this.disposeRoom(r);
+    }, EMPTY_ROOM_GRACE_MS);
   }
 
   // 玩家按下離開遊戲：對局進行中（含單局結算）→ 整場結束、顯示最終計分版給其餘玩家
@@ -468,16 +504,23 @@ export class GameServer {
   private disposeRoom(room: Room) {
     if (room.claimTimer) clearTimeout(room.claimTimer);
     if (room.dealerRevealTimer) clearTimeout(room.dealerRevealTimer);
+    if (room.disposeTimer) clearTimeout(room.disposeTimer);
     this.rooms.delete(room.id);
     this.codeIndex.delete(room.code);
     for (const p of room.players) this.tokenIndex.delete(p.token);
   }
 
-  // 公開大廳：所有公開、等待中、有空位的房間摘要
+  // 公開大廳：所有公開、等待中、有空位、還有人在線的房間摘要
+  // （全員離線的房間在回收寬限期內仍可用房號連結加入，但不顯示在大廳）
   publicLobby(): LobbyRoom[] {
     const list: LobbyRoom[] = [];
     for (const room of this.rooms.values()) {
-      if (room.isPublic && room.phase === 'WAITING' && room.players.length < MAX_PLAYERS) {
+      if (
+        room.isPublic &&
+        room.phase === 'WAITING' &&
+        room.players.length < MAX_PLAYERS &&
+        room.players.some((p) => p.connected)
+      ) {
         list.push({
           code: room.code,
           hostName: room.players.find((p) => p.id === room.hostId)?.name ?? '房主',

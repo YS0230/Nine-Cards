@@ -163,8 +163,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on('disconnect', () => {
-    const room = game.markDisconnected(socket.id);
-    if (room) pushState(room);
+    for (const room of game.markDisconnected(socket.id)) pushState(room);
     broadcastLobby(); // 公開房人數/存在可能改變
   });
 });
