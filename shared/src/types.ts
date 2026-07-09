@@ -6,6 +6,12 @@ export type RoomPhase = 'WAITING' | 'PLAYING' | 'FINISHED' | 'ENDED';
 // drawFive＝胡牌後由胡牌者手動一張一張抽五隻（§9.2）
 export type ActionType = 'draw' | 'discard' | 'eat' | 'pass' | 'declareWin' | 'drawFive';
 
+// 玩家人形立牌：角色固定依座位方位分配（見 client tableScene.ts），
+// 呈現哪一套畫風（qb 去背／g7／3d 模型）是每位玩家「自己看」的本地顯示設定
+// （比照 2D/3D 切換鈕，存 localStorage，不送伺服器、不影響其他玩家看到的畫面）。
+export type StandeeCharacter = 'dishen' | 'dixia' | 'disheng';
+export type StandeeStyle = 'qb' | 'g7' | '3d';
+
 // ── 大廳/房間（未開局）視圖 ──────────────────────────────
 export interface RoomSeat {
   playerId: string | null;

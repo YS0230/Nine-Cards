@@ -3,11 +3,15 @@
 // 點選（raycast）只回報「哪張牌被點了」，合法性仍完全交給伺服器判定。
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import {
   cardImageBase,
   type Card as CardT,
   type PersonalGameState,
   type PublicPlayer,
+  type StandeeCharacter,
+  type StandeeStyle,
 } from '@nine-cards/shared';
 
 export interface SceneInput {
@@ -15,6 +19,8 @@ export interface SceneInput {
   selectedId: string | null;
   pickableIds: Set<string>; // 此刻可點選（出牌）的我方牌 id
   canPass: boolean; // 自摸保護中：點中央那張＝不吃打出（pass）
+  // 玩家人形立牌畫風：比照 2D/3D 切換鈕，這是「自己看」的本地顯示設定（不送伺服器）
+  standeeStyle: StandeeStyle;
 }
 
 export interface SceneCallbacks {
@@ -47,9 +53,11 @@ const MONEY_ANCHOR: Record<'top' | 'left' | 'right', THREE.Vector3> = {
 const MY_MONEY_ANCHOR = new THREE.Vector3(0, 0, 5.5);
 
 // 玩家人形立牌：貼在各對手座位外緣的看板（billboard，永遠面向鏡頭），純裝飾用。
-// 3 張圖對應最多 3 個對手方位（top/left/right，四人局才會三個同時出現）
+// 3 張圖對應最多 3 個對手方位（top/left/right，四人局才會三個同時出現）；
+// 呈現哪一套畫風（qb/g7/3d）是每位玩家自己的本地顯示設定（見 SceneInput.standeeStyle），
+// 3d 也是billboard（每幀朝向鏡頭），與 qb/g7 平面圖視覺行為一致。
 const STANDEE_H = 2.6;
-const STANDEE_ZONE_IMG: Record<'top' | 'left' | 'right', string> = {
+const STANDEE_ZONE_CHAR: Record<'top' | 'left' | 'right', StandeeCharacter> = {
   top: 'dishen',
   left: 'dixia',
   right: 'disheng',
@@ -58,6 +66,19 @@ const STANDEE_ZONE_POS: Record<'top' | 'left' | 'right', THREE.Vector3> = {
   top: new THREE.Vector3(0, 0, -6.6),
   left: new THREE.Vector3(-5.3, 0, 0),
   right: new THREE.Vector3(5.3, 0, 0),
+};
+// 3d 模型有實際體積（不像去背貼圖是薄薄一片），貼著桌緣站會看起來疊到桌面上，
+// 站位要比 2D 立牌貼圖再往後退一點，才會落在桌子後方而非桌面上方。
+// 上家/下家（左右兩側）實測不需要退這麼多，退太遠會離桌子太遠，故側邊用較小的值。
+const STANDEE_MODEL_EXTRA_BACK = 2.4;
+const STANDEE_MODEL_EXTRA_BACK_SIDE = 1.0;
+// AI 由 2D 圖片生成的模型，正面朝向的本地軸不保證是 -Z（lookAt 假設的方向）；
+// 實測目前會偏向鏡頭右側 90 度，故在正規化時先補一個偏航角修正
+const STANDEE_MODEL_FRONT_OFFSET = -Math.PI / 2;
+const STANDEE_MODEL_ZONE_POS: Record<'top' | 'left' | 'right', THREE.Vector3> = {
+  top: STANDEE_ZONE_POS.top.clone().add(new THREE.Vector3(0, 0, -STANDEE_MODEL_EXTRA_BACK)),
+  left: STANDEE_ZONE_POS.left.clone().add(new THREE.Vector3(-STANDEE_MODEL_EXTRA_BACK_SIDE, 0, 0)),
+  right: STANDEE_ZONE_POS.right.clone().add(new THREE.Vector3(STANDEE_MODEL_EXTRA_BACK_SIDE, 0, 0)),
 };
 
 const BILL_W = 1.0;
@@ -109,9 +130,105 @@ interface MoneyNode {
   targetQuat: THREE.Quaternion;
 }
 
-interface StandeeNode {
-  sprite: THREE.Sprite;
-  mat: THREE.SpriteMaterial;
+// standeeKey＝該節點目前呈現的「畫風:角色」，用來判斷玩家切換畫風設定時是否需要換掉節點
+type StandeeNode =
+  | { kind: 'sprite'; sprite: THREE.Sprite; mat: THREE.SpriteMaterial; standeeKey: string }
+  | { kind: 'model'; object: THREE.Object3D; standeeKey: string };
+
+function standeeImagePath(style: StandeeStyle, character: StandeeCharacter): string {
+  return `/players/${style}/${character}.png`;
+}
+
+// 圖片轉 3D 生成的模型常會在角色本體外，多出一小塊沒有實際連接、憑空飄浮的殘留面片
+// （生成時對被遮擋/背面區域的猜測所致）。只保留三角形數最多的連通分量（角色本體），
+// 丟棄其餘與本體不相連的殘留幾何。座標視為同一頂點（縫合處常有重複頂點造成索引不同）
+// 用來判斷「相連」，量化到小數點後 5 位以吸收浮點誤差。
+function pruneDisconnectedDebris(geometry: THREE.BufferGeometry): THREE.BufferGeometry {
+  const posAttr = geometry.getAttribute('position');
+  const index = geometry.getIndex();
+  if (!index || !posAttr) return geometry;
+  const vertexCount = posAttr.count;
+
+  const parent = new Int32Array(vertexCount);
+  for (let i = 0; i < vertexCount; i++) parent[i] = i;
+  const find = (x: number): number => {
+    while (parent[x] !== x) {
+      parent[x] = parent[parent[x]];
+      x = parent[x];
+    }
+    return x;
+  };
+  const union = (a: number, b: number) => {
+    const ra = find(a);
+    const rb = find(b);
+    if (ra !== rb) parent[ra] = rb;
+  };
+
+  // 縫合處重複頂點（座標相同、索引不同）先合併，連通性判斷才不會被切斷
+  const posKey = new Map<string, number>();
+  for (let i = 0; i < vertexCount; i++) {
+    const key = `${posAttr.getX(i).toFixed(5)},${posAttr.getY(i).toFixed(5)},${posAttr.getZ(i).toFixed(5)}`;
+    const existing = posKey.get(key);
+    if (existing === undefined) posKey.set(key, i);
+    else union(i, existing);
+  }
+
+  const idx = index.array;
+  const triCount = idx.length / 3;
+  for (let t = 0; t < triCount; t++) {
+    union(idx[t * 3], idx[t * 3 + 1]);
+    union(idx[t * 3 + 1], idx[t * 3 + 2]);
+  }
+
+  const triRoot = new Int32Array(triCount);
+  const rootTriCount = new Map<number, number>();
+  for (let t = 0; t < triCount; t++) {
+    const root = find(idx[t * 3]);
+    triRoot[t] = root;
+    rootTriCount.set(root, (rootTriCount.get(root) ?? 0) + 1);
+  }
+  if (rootTriCount.size <= 1) return geometry; // 整塊都相連，沒有孤立殘留
+
+  let bestRoot = -1;
+  let bestCount = -1;
+  for (const [root, count] of rootTriCount) {
+    if (count > bestCount) {
+      bestCount = count;
+      bestRoot = root;
+    }
+  }
+
+  const keptIndices: number[] = [];
+  for (let t = 0; t < triCount; t++) {
+    if (triRoot[t] === bestRoot) keptIndices.push(idx[t * 3], idx[t * 3 + 1], idx[t * 3 + 2]);
+  }
+  const pruned = geometry.clone();
+  pruned.setIndex(keptIndices);
+  return pruned;
+}
+
+// glTF 模型原始尺寸/軸心未知：先丟棄與本體不相連的殘留幾何，再等比縮放到 STANDEE_H、
+// 底部貼齊 y=0（腳踩地面），水平（x/z）也置中對齊模型自身的腳底中心，讓 wrapper 的原點＝
+// 「站立點」正下方。若只校正 y、不校正 x/z，模型軸心偏離腳底中心時，每幀朝鏡頭轉向會繞著
+// 偏移的軸心打轉，導致站位隨鏡頭角度飄移、疊到桌面上。
+// 外層再包一個 Group，讓每個場景實例可各自設定 position/rotation 而不影響快取的原始模型。
+function normalizeStandeeModel(root: THREE.Object3D): THREE.Group {
+  root.traverse((obj) => {
+    if (obj instanceof THREE.Mesh) obj.geometry = pruneDisconnectedDebris(obj.geometry);
+  });
+  root.rotation.y = STANDEE_MODEL_FRONT_OFFSET;
+  const box = new THREE.Box3().setFromObject(root);
+  const size = new THREE.Vector3();
+  box.getSize(size);
+  const scale = STANDEE_H / (size.y || 1);
+  root.scale.setScalar(scale);
+  const grounded = new THREE.Box3().setFromObject(root);
+  const center = new THREE.Vector3();
+  grounded.getCenter(center);
+  root.position.set(-center.x, -grounded.min.y, -center.z);
+  const wrapper = new THREE.Group();
+  wrapper.add(root);
+  return wrapper;
 }
 
 // 一張牌的顯示目標
@@ -184,9 +301,12 @@ export class TableScene {
   private moneyTextures = new Map<number, THREE.Texture>();
   private moneyNodes = new Map<string, MoneyNode>();
 
-  // 玩家人形立牌：依對手方位（top/left/right）站在桌緣的看板
-  private standeeTextures = new Map<string, THREE.Texture>();
-  private standeeNodes = new Map<string, StandeeNode>();
+  // 玩家人形立牌：依對手方位（top/left/right）站在桌緣，角色/畫風由該玩家自選
+  private standeeTextures = new Map<string, THREE.Texture>(); // key＝`${style}:${character}`（qb/g7 平面圖）
+  private standeeNodes = new Map<string, StandeeNode>(); // key＝`standee:${zone}`
+  private gltfLoader = new GLTFLoader();
+  private standeeModelTemplates = new Map<StandeeCharacter, THREE.Group>(); // 3d 模型快取（已正規化尺寸/軸心）
+  private standeeModelLoading = new Map<StandeeCharacter, Promise<THREE.Group>>();
   private everSynced = false; // 首次同步不做飛牌動畫（重連/切回 3D 直接就定位）
   private prevDiscardLen = 0; // 上次同步的棄牌數：判斷哪些是「剛打出」的牌
   private prevActorSeat: number | null = null; // 上次同步時最可能出牌的座位（吃牌者＞行動者）
@@ -298,7 +418,16 @@ export class TableScene {
     for (const t of this.moneyTextures.values()) t.dispose();
     for (const n of this.moneyNodes.values()) n.mat.dispose();
     for (const t of this.standeeTextures.values()) t.dispose();
-    for (const n of this.standeeNodes.values()) n.mat.dispose();
+    for (const n of this.standeeNodes.values()) {
+      if (n.kind === 'sprite') n.mat.dispose();
+    }
+    for (const template of this.standeeModelTemplates.values()) {
+      template.traverse((obj) => {
+        if (!(obj instanceof THREE.Mesh)) return;
+        obj.geometry.dispose();
+        for (const m of Array.isArray(obj.material) ? obj.material : [obj.material]) m.dispose();
+      });
+    }
   }
 
   private resize() {
@@ -385,8 +514,8 @@ export class TableScene {
     // 各家剩餘金額：直接堆在桌面上（紙幣可重疊、錢幣疊在最上方）
     this.syncMoneyNodes(this.computeMoneyTargets(input.g));
 
-    // 玩家人形立牌：依對手方位站在桌緣
-    this.syncStandees(input.g);
+    // 玩家人形立牌：依對手方位站在桌緣，畫風依 input.standeeStyle（本地顯示設定）
+    this.syncStandees(input.g, input.standeeStyle);
 
     // 供下次同步判斷「剛打出的牌從誰那邊飛出」
     this.everSynced = true;
@@ -717,9 +846,9 @@ export class TableScene {
     }
   }
 
-  // 玩家人形立牌：哪個對手方位（top/left/right）目前有人坐，就在該方位放一張看板；
-  // 空位（例如三人局沒有 top）則移除。永遠面向鏡頭（Sprite），不需要每幀更新朝向
-  private syncStandees(g: PersonalGameState) {
+  // 玩家人形立牌：哪個對手方位（top/left/right）目前有人坐，就在該方位放一張看板（角色固定依方位分配）；
+  // 空位（例如三人局沒有 top）則移除。畫風（qb/g7/3d）是本地顯示設定，切換時 standeeKey 比對不同就整個節點換掉重建。
+  private syncStandees(g: PersonalGameState, style: StandeeStyle) {
     const mySeat = g.you.seat;
     const seatCount = g.players.length;
     const turnDist = (seat: number) => (mySeat - seat + seatCount) % seatCount;
@@ -733,37 +862,131 @@ export class TableScene {
       if (!occupied.has(zone)) {
         const node = this.standeeNodes.get(key);
         if (node) {
-          this.scene.remove(node.sprite);
-          node.mat.dispose();
+          this.removeStandeeNode(node);
           this.standeeNodes.delete(key);
         }
         continue;
       }
-      if (this.standeeNodes.has(key)) continue;
-      const mat = new THREE.SpriteMaterial({ map: this.standeeTexture(zone), transparent: true });
-      const sprite = new THREE.Sprite(mat);
-      sprite.center.set(0.5, 0); // 錨點在底部中心＝站在桌緣（position.y=0 即貼地）
-      sprite.scale.set(STANDEE_H * 0.5, STANDEE_H, 1); // 貼圖載入前的暫定寬高比，載入後於 standeeTexture 內校正
-      sprite.position.copy(STANDEE_ZONE_POS[zone]);
-      this.scene.add(sprite);
-      this.standeeNodes.set(key, { sprite, mat });
+      const character = STANDEE_ZONE_CHAR[zone];
+      const standeeKey = `${style}:${character}`;
+      const existing = this.standeeNodes.get(key);
+      if (existing?.standeeKey === standeeKey) continue;
+      if (existing) {
+        this.removeStandeeNode(existing);
+        this.standeeNodes.delete(key);
+      }
+      if (style === '3d') {
+        this.addModelStandee(zone, key, character, standeeKey);
+      } else {
+        this.addSpriteStandee(zone, key, style, character, standeeKey);
+      }
     }
   }
 
-  private standeeTexture(zone: 'top' | 'left' | 'right'): THREE.Texture {
-    const name = STANDEE_ZONE_IMG[zone];
-    let tex = this.standeeTextures.get(name);
+  private removeStandeeNode(node: StandeeNode) {
+    if (node.kind === 'sprite') {
+      this.scene.remove(node.sprite);
+      node.mat.dispose(); // map 快取在 standeeTextures，共用資源不在此釋放
+    } else {
+      this.scene.remove(node.object); // 幾何/材質快取在 standeeModelTemplates，共用資源不在此釋放
+    }
+  }
+
+  private addSpriteStandee(
+    zone: 'top' | 'left' | 'right',
+    key: string,
+    style: StandeeStyle,
+    character: StandeeCharacter,
+    standeeKey: string,
+  ) {
+    const mat = new THREE.SpriteMaterial({ transparent: true });
+    const sprite = new THREE.Sprite(mat);
+    sprite.center.set(0.5, 0); // 錨點在底部中心＝站在桌緣（position.y=0 即貼地）
+    sprite.scale.set(STANDEE_H * 0.5, STANDEE_H, 1); // 貼圖取得前的暫定寬高比，載入後於 fixStandeeAspect 內校正
+    sprite.position.copy(STANDEE_ZONE_POS[zone]);
+    this.scene.add(sprite);
+    // 必須先註冊節點，standeeTexture() 若命中快取會同步呼叫 fixStandeeAspect 校正寬高比，
+    // 若先取貼圖才註冊，快取命中時這個節點還找不到，寬高比就會卡在上面的暫定值（畫面被壓扁）
+    this.standeeNodes.set(key, { kind: 'sprite', sprite, mat, standeeKey });
+    mat.map = this.standeeTexture(style, character);
+    mat.needsUpdate = true;
+  }
+
+  private standeeTexture(style: StandeeStyle, character: StandeeCharacter): THREE.Texture {
+    const cacheKey = `${style}:${character}`;
+    let tex = this.standeeTextures.get(cacheKey);
     if (!tex) {
-      tex = this.loader.load(`/players/${name}.png`, (loaded) => {
-        const img = loaded.image as { width: number; height: number };
-        const aspect = img.width / img.height;
-        const node = this.standeeNodes.get(`standee:${zone}`);
-        node?.sprite.scale.set(STANDEE_H * aspect, STANDEE_H, 1);
-      });
+      tex = this.loader.load(standeeImagePath(style, character), (loaded) =>
+        this.fixStandeeAspect(cacheKey, loaded),
+      );
       tex.colorSpace = THREE.SRGBColorSpace;
-      this.standeeTextures.set(name, tex);
+      this.standeeTextures.set(cacheKey, tex);
+    } else if (tex.image) {
+      // 貼圖先前已載入過（例如另一個方位也是同角色/畫風）：立即套用寬高比，不必等 callback
+      this.fixStandeeAspect(cacheKey, tex);
     }
     return tex;
+  }
+
+  private fixStandeeAspect(cacheKey: string, tex: THREE.Texture) {
+    const img = tex.image as { width: number; height: number } | undefined;
+    if (!img?.width) return;
+    const aspect = img.width / img.height;
+    for (const node of this.standeeNodes.values()) {
+      if (node.kind === 'sprite' && node.standeeKey === cacheKey) {
+        node.sprite.scale.set(STANDEE_H * aspect, STANDEE_H, 1);
+      }
+    }
+  }
+
+  // 3d 畫風：實體 glTF 模型，先放一個空 Group 佔位（避免站位空拍），模型載入完成後原地換上；
+  // 角色模型共用同一份快取（clone 出場景實例）。朝向在 tick() 內每幀更新（billboard，見下方）。
+  private addModelStandee(
+    zone: 'top' | 'left' | 'right',
+    key: string,
+    character: StandeeCharacter,
+    standeeKey: string,
+  ) {
+    const placeholder = new THREE.Group();
+    placeholder.position.copy(STANDEE_MODEL_ZONE_POS[zone]);
+    this.scene.add(placeholder);
+    this.standeeNodes.set(key, { kind: 'model', object: placeholder, standeeKey });
+    this.standeeModel(character)
+      .then((template) => {
+        const current = this.standeeNodes.get(key);
+        if (!current || current.standeeKey !== standeeKey) return; // 載入期間又被切換掉了
+        this.scene.remove(placeholder);
+        const instance = cloneSkeleton(template) as THREE.Object3D;
+        instance.position.copy(STANDEE_MODEL_ZONE_POS[zone]);
+        this.scene.add(instance);
+        this.standeeNodes.set(key, { kind: 'model', object: instance, standeeKey });
+      })
+      .catch((err) => console.error('立牌模型載入失敗', character, err));
+  }
+
+  private standeeModel(character: StandeeCharacter): Promise<THREE.Group> {
+    const cached = this.standeeModelTemplates.get(character);
+    if (cached) return Promise.resolve(cached);
+    const pending = this.standeeModelLoading.get(character);
+    if (pending) return pending;
+    const p = new Promise<THREE.Group>((resolve, reject) => {
+      this.gltfLoader.load(
+        `/players/3d/${character}.glb`,
+        (gltf) => {
+          const template = normalizeStandeeModel(gltf.scene);
+          this.standeeModelTemplates.set(character, template);
+          this.standeeModelLoading.delete(character);
+          resolve(template);
+        },
+        undefined,
+        (err) => {
+          this.standeeModelLoading.delete(character);
+          reject(err instanceof Error ? err : new Error(String(err)));
+        },
+      );
+    });
+    this.standeeModelLoading.set(character, p);
+    return p;
   }
 
   // ── 每幀：位置/朝向插值＋光圈脈動 ─────────────────────────
@@ -779,6 +1002,11 @@ export class TableScene {
     for (const node of this.moneyNodes.values()) {
       node.mesh.position.lerp(node.targetPos, a);
       node.mesh.quaternion.slerp(node.targetQuat, a);
+    }
+    // 3d 立牌模型不像 Sprite 會自動朝向鏡頭，每幀手動轉向（僅繞 Y 軸偏航角，維持站立不歪斜；
+    // 桌面鏡頭本來就採俯角，站立模型不整個歪頭「盯」鏡頭才自然）。
+    for (const node of this.standeeNodes.values()) {
+      if (node.kind === 'model') node.object.lookAt(this.camera.position.x, node.object.position.y, this.camera.position.z);
     }
     if (this.claimRing.visible) {
       const t = this.clock.elapsedTime;

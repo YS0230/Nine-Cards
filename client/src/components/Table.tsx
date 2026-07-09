@@ -4,9 +4,19 @@ import { Card } from './Card.js';
 import { Scene3D } from '../three/Scene3D.js';
 import { playCardVoice, playEffect } from '../sound.js';
 import { moneyIconUrl } from '../money.js';
-import type { PublicPlayer, Card as CardT, GameOverPayload, DrawFiveView } from '@nine-cards/shared';
+import type {
+  PublicPlayer,
+  Card as CardT,
+  GameOverPayload,
+  DrawFiveView,
+  StandeeStyle,
+} from '@nine-cards/shared';
 
 const LS_VIEW3D = 'nineCards.view3d';
+const LS_STANDEE_STYLE = 'nineCards.standeeStyle';
+// 玩家人形立牌畫風：比照 2D/3D 切換鈕，純本地顯示設定（不送伺服器），依序循環
+const STANDEE_STYLE_CYCLE: StandeeStyle[] = ['qb', 'g7', '3d'];
+const STANDEE_STYLE_LABEL: Record<StandeeStyle, string> = { qb: '去背', g7: 'G7', '3d': '3D立牌' };
 
 export function Table({ api }: { api: GameApi }) {
   const g = api.game!;
@@ -17,6 +27,17 @@ export function Table({ api }: { api: GameApi }) {
     setView3d((v) => {
       localStorage.setItem(LS_VIEW3D, v ? '0' : '1');
       return !v;
+    });
+  };
+  // 對手人形立牌畫風（去背／G7／3D 模型），記住玩家選擇
+  const [standeeStyle, setStandeeStyle] = useState<StandeeStyle>(
+    () => (localStorage.getItem(LS_STANDEE_STYLE) as StandeeStyle | null) ?? 'qb',
+  );
+  const cycleStandeeStyle = () => {
+    setStandeeStyle((s) => {
+      const next = STANDEE_STYLE_CYCLE[(STANDEE_STYLE_CYCLE.indexOf(s) + 1) % STANDEE_STYLE_CYCLE.length];
+      localStorage.setItem(LS_STANDEE_STYLE, next);
+      return next;
     });
   };
 
@@ -234,6 +255,11 @@ export function Table({ api }: { api: GameApi }) {
         <button className="chip" onClick={toggleView}>
           {view3d ? '2D' : '3D'}
         </button>
+        {view3d && (
+          <button className="chip" onClick={cycleStandeeStyle} title="切換對手立牌畫風">
+            立牌：{STANDEE_STYLE_LABEL[standeeStyle]}
+          </button>
+        )}
         <button className="chip leave-chip" onClick={onLeaveClick}>
           離開
         </button>
@@ -249,6 +275,7 @@ export function Table({ api }: { api: GameApi }) {
             selectedId={selected}
             pickableIds={pickableIds}
             canPass={canPass}
+            standeeStyle={standeeStyle}
             onPick={setSelected}
             onPass={() => api.act('pass')}
           />

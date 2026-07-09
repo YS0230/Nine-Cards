@@ -7,7 +7,7 @@ interface Props extends SceneInput {
   onPass: () => void;
 }
 
-export function Scene3D({ g, selectedId, pickableIds, canPass, onPick, onPass }: Props) {
+export function Scene3D({ g, selectedId, pickableIds, canPass, standeeStyle, onPick, onPass }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<TableScene | null>(null);
   // callbacks 走 ref，避免每次 render 重建整個場景
@@ -27,8 +27,8 @@ export function Scene3D({ g, selectedId, pickableIds, canPass, onPick, onPass }:
   }, []);
 
   useEffect(() => {
-    sceneRef.current?.sync({ g, selectedId, pickableIds, canPass });
-  }, [g, selectedId, pickableIds, canPass]);
+    sceneRef.current?.sync({ g, selectedId, pickableIds, canPass, standeeStyle });
+  }, [g, selectedId, pickableIds, canPass, standeeStyle]);
 
   return <div className="scene3d" ref={containerRef} />;
 }
