@@ -21,7 +21,7 @@ const RANK_SOUND: Record<Rank, string> = {
   包: 'bao',
   卒: 'zu',
 };
-// 動作音效：吃牌（手中死牌就地湊對時改播「撿」）／聽牌／胡牌（自摸另用專屬音效）／打出死牌
+// 動作音效：吃牌（手中死牌就地湊對時改播「撿」）／聽牌／胡牌（自摸另用專屬音效）／打出死牌／抽五隻抽牌
 const EFFECT_SOUND = {
   eat: 'chi',
   pickupDead: 'jian',
@@ -29,6 +29,7 @@ const EFFECT_SOUND = {
   win: 'hu',
   selfDrawWin: 'zimo',
   deadCard: 'sipai',
+  drawFive: 'chou',
 } as const;
 export type EffectKind = keyof typeof EFFECT_SOUND;
 

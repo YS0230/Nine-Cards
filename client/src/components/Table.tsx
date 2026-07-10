@@ -126,6 +126,8 @@ export function Table({ api }: { api: GameApi }) {
   const prevDeadIds = useRef(
     new Set<string>([...g.you.deadIds, ...g.players.flatMap((p) => p.deadCards.map((c) => c.id))]),
   );
+  // 抽五隻已抽張數：每抽出一張播「抽」音效
+  const prevDrawFiveCount = useRef(g.drawFive?.drawn ?? 0);
 
   useEffect(() => {
     // ── 報牌語音：牌第一次公開（摸出／打出）時唸出「顏色＋牌名」，同一張只報一次 ──
@@ -156,6 +158,10 @@ export function Table({ api }: { api: GameApi }) {
       ...g.you.deadIds,
       ...g.players.flatMap((p) => p.deadCards.map((c) => c.id)),
     ]);
+    // 抽五隻（§9.2）：每抽出一張播「抽」（所有玩家都聽得到，不只按鈕的人）
+    const drawFiveCount = g.drawFive?.drawn ?? 0;
+    if (g.drawFive && drawFiveCount > prevDrawFiveCount.current) void playEffect('drawFive');
+    prevDrawFiveCount.current = drawFiveCount;
     let card: CardT | null = null;
     let label = '翻牌';
     // 吃牌（含被更高優先者搶吃）以「座位+牌」為鍵，換人吃同一張也會再跳一次

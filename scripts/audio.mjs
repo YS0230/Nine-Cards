@@ -32,6 +32,7 @@ const FILES = {
   死牌: 'sipai',
   自摸: 'zimo',
   撿: 'jian',
+  抽: 'chou',
 };
 
 await mkdir(OUT, { recursive: true });
