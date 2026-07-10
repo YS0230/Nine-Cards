@@ -33,12 +33,13 @@ export interface RoomView {
   maxPlayers: number;
 }
 
-// 公開大廳中每個可加入房間的摘要
+// 公開大廳中每個房間的摘要（遊戲中的房間也會列出，但不可加入）
 export interface LobbyRoom {
   code: string;
   hostName: string;
   count: number;
   maxPlayers: number;
+  inGame: boolean; // 已開局：僅顯示，不可加入
 }
 
 // ── 對局中：送給「其他玩家」看到的公開資訊 ──────────────

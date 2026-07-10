@@ -153,7 +153,7 @@ io.on('connection', (socket) => {
     const r = game.startGame(playerId);
     if (!r.ok) return emitError(socket.id, r.error);
     if (r.room) pushState(r.room);
-    broadcastLobby(); // 開局後房間離開等待狀態，從大廳移除
+    broadcastLobby(); // 開局後房間改標記為遊戲中（大廳仍顯示但不可加入）
   });
 
   socket.on(EVT.ACTION, (playerId: string, req: ActionReq) => {

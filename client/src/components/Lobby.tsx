@@ -175,12 +175,13 @@ export function Lobby({ api }: { api: GameApi }) {
                     <span className="room-count">
                       {r.count}/{r.maxPlayers}
                     </span>
+                    {/* 遊戲中的房間僅顯示狀態，不可加入 */}
                     <button
                       className="btn small primary"
-                      disabled={!nameOk}
+                      disabled={!nameOk || r.inGame}
                       onClick={() => api.joinRoom(r.code, name)}
                     >
-                      加入
+                      {r.inGame ? '遊戲中' : '加入'}
                     </button>
                   </li>
                 ))}

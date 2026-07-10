@@ -547,24 +547,23 @@ export class GameServer {
     for (const p of room.players) this.tokenIndex.delete(p.token);
   }
 
-  // 公開大廳：所有公開、等待中、有空位、還有人在線的房間摘要
+  // 公開大廳：所有公開、還有人在線的房間摘要。等待中且有空位的可加入；
+  // 已開局（遊戲中／結算中）的也列出但標記 inGame，僅供觀看不可加入。
   // （全員離線的房間在回收寬限期內仍可用房號連結加入，但不顯示在大廳）
   publicLobby(): LobbyRoom[] {
     const list: LobbyRoom[] = [];
     for (const room of this.rooms.values()) {
-      if (
-        room.isPublic &&
-        room.phase === 'WAITING' &&
-        room.players.length < MAX_PLAYERS &&
-        room.players.some((p) => p.connected)
-      ) {
-        list.push({
-          code: room.code,
-          hostName: room.players.find((p) => p.id === room.hostId)?.name ?? '房主',
-          count: room.players.length,
-          maxPlayers: MAX_PLAYERS,
-        });
-      }
+      if (!room.isPublic || !room.players.some((p) => p.connected)) continue;
+      const waiting = room.phase === 'WAITING';
+      if (waiting && room.players.length >= MAX_PLAYERS) continue;
+      if (!waiting && room.phase !== 'PLAYING' && room.phase !== 'FINISHED') continue;
+      list.push({
+        code: room.code,
+        hostName: room.players.find((p) => p.id === room.hostId)?.name ?? '房主',
+        count: room.players.length,
+        maxPlayers: MAX_PLAYERS,
+        inGame: !waiting,
+      });
     }
     return list;
   }
