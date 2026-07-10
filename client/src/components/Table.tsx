@@ -44,12 +44,16 @@ export function Table({ api }: { api: GameApi }) {
 
   const mySeat = g.you.seat;
   const seatCount = g.players.length;
+  // 五人以上：3D 場景只有左／右／對面三個方位，容不下更多座位 → 強制 2D 緊湊版面
+  const manySeats = seatCount > 4;
+  const show3d = view3d && !manySeats;
   // 逆時鐘輪替：我到對方的輪替距離（1＝下家、n-1＝上家）
   const turnDist = (seat: number) => (mySeat - seat + seatCount) % seatCount;
-  // 排列如實體牌桌視角：左＝上家、中＝對家、右＝下家（距離大→小）
+  // ≤4 人排列如實體牌桌視角：左＝上家、中＝對家、右＝下家（距離大→小）；
+  // 五人以上為左欄直排，改依行動順序（距離小→大）：下家在最上、上家在最下
   const opponents = g.players
     .filter((p) => p.seat !== mySeat)
-    .sort((a, b) => turnDist(b.seat) - turnDist(a.seat));
+    .sort((a, b) => (manySeats ? turnDist(a.seat) - turnDist(b.seat) : turnDist(b.seat) - turnDist(a.seat)));
   const me = g.players.find((p) => p.seat === mySeat);
   const myScore = me?.score ?? 0;
   const myMoney = me?.money ?? 0;
@@ -78,13 +82,15 @@ export function Table({ api }: { api: GameApi }) {
   const nameOf = (seat: number) =>
     seat === mySeat ? '你' : (g.players.find((p) => p.seat === seat)?.name ?? `座位${seat}`);
   // 相對位置標示（逆時鐘換人 → 輪替距離 1＝下家、n-1＝上家）：
-  // 兩人＝對家；三人＝上、下家；四人＝上、對、下家
+  // 兩人＝對家；三人＝上、下家；四人＝上、對、下家；
+  // 五人以上中間座位依行動順序編號（二家＝我之後第二位、三家…）
   const relationOf = (seat: number): string => {
     if (seatCount === 2) return '對家';
     const d = turnDist(seat);
     if (d === 1) return '下家';
     if (d === seatCount - 1) return '上家';
-    return '對家';
+    if (seatCount <= 4) return '對家';
+    return `${['', '', '二', '三', '四', '五', '六'][d] ?? d}家`;
   };
   // 3D 牌桌對手資訊疊層：固定貼在畫面邊緣（下家右／上家左／對家上），不隨鏡頭位置變化
   const zoneOf = (seat: number): 'left' | 'right' | 'top' => {
@@ -288,10 +294,13 @@ export function Table({ api }: { api: GameApi }) {
           💬
           {unread > 0 && <span className="chat-chip-badge">{unread > 9 ? '9+' : unread}</span>}
         </button>
-        <button className="chip" onClick={toggleView}>
-          {view3d ? '2D' : '3D'}
-        </button>
-        {view3d && (
+        {/* 五人以上僅有 2D 版面，不顯示切換鈕 */}
+        {!manySeats && (
+          <button className="chip" onClick={toggleView}>
+            {view3d ? '2D' : '3D'}
+          </button>
+        )}
+        {show3d && (
           <button className="chip" onClick={cycleStandeeStyle} title="切換對手立牌畫風">
             立牌：{STANDEE_STYLE_LABEL[standeeStyle]}
           </button>
@@ -303,7 +312,7 @@ export function Table({ api }: { api: GameApi }) {
 
       {showTurnBanner && turnStartRef.current != null && <TurnBanner startedAt={turnStartRef.current} />}
 
-      {view3d ? (
+      {show3d ? (
         /* 3D 牌桌（three.js）：手牌/對手/棄牌/牌堆全在場景內，點牌選牌 */
         <section className="scene3d-wrap">
           <Scene3D
@@ -357,7 +366,8 @@ export function Table({ api }: { api: GameApi }) {
           {g.message && <div className="msg s3-msg">{g.message}</div>}
         </section>
       ) : (
-        <>
+        /* 2D 版面：≤4 人為上（對手橫列）下（桌面）；五人以上改左（對手直欄，全員同屏）右（桌面） */
+        <div className={`table-main ${manySeats ? 'side' : ''}`}>
           <section className="opponents">
             {opponents.map((p) => (
               <OpponentSeat
@@ -365,6 +375,7 @@ export function Table({ api }: { api: GameApi }) {
                 p={p}
                 relation={relationOf(p.seat)}
                 active={p.seat === g.currentTurnSeat}
+                compact={manySeats}
                 bubbleText={bubble?.seat === p.seat ? bubble.text : undefined}
               />
             ))}
@@ -416,7 +427,7 @@ export function Table({ api }: { api: GameApi }) {
             </div>
             {g.message && <div className="msg">{g.message}</div>}
           </section>
-        </>
+        </div>
       )}
 
       {/* 聊天浮動面板：掛在 .table 層（2D/3D 共用），貼在手牌區上方 */}
@@ -435,7 +446,7 @@ export function Table({ api }: { api: GameApi }) {
         {bubble?.seat === mySeat && <div className="chat-bubble me-bubble">{bubble.text}</div>}
         {/* 公開區（吃牌對子＋死牌單張）｜分隔線｜暗手牌，同一列、同尺寸、依寬度自動縮放
             （3D 模式下手牌畫在場景裡，這一列不顯示） */}
-        {!view3d && (
+        {!show3d && (
           <div className="hand-row" aria-label="我的公開區與手牌">
             {g.you.melds.map((pair, i) => (
               <div className="meld" key={`m${i}`}>
@@ -639,7 +650,8 @@ function DealerDrawPanel({
   const iDrew = dealerDraw.draws[mySeat] != null;
   return (
     <div className="overlay">
-      <div className="result dealer-draw">
+      {/* 五人以上（.many）：一人一列太高會超出手機畫面 → 改雙欄格狀 */}
+      <div className={`result dealer-draw ${players.length > 4 ? 'many' : ''}`}>
         <h2>抽牌決定莊家</h2>
         <div className="dd-hint">先比大小（帥/將最大），再比顏色（黃＞紅＞綠＞白）</div>
         <div className="dd-rows">
@@ -931,56 +943,83 @@ function OpponentSeat({
   p,
   relation,
   active,
+  compact = false,
   bubbleText,
 }: {
   p: PublicPlayer;
-  relation: string; // 相對位置：上家／對家／下家
+  relation: string; // 相對位置：上家／對家／下家（五人以上中間座位為 二家、三家…）
   active: boolean;
+  compact?: boolean; // 五人以上的左欄緊湊模式：暗牌改張數、公開區縮小可展開
   bubbleText?: string; // 這位玩家剛說的話（短暫顯示的對話氣泡）
 }) {
+  // 緊湊模式下公開區（吃牌對子＋死牌）預設縮小，點整張座位卡展開／收合看清牌面
+  const [expanded, setExpanded] = useState(false);
+  const hasOpen = p.melds.length > 0 || p.deadCards.length > 0;
   return (
-    <div className={`opp ${active ? 'active' : ''}`}>
+    <div
+      className={`opp ${active ? 'active' : ''} ${compact ? 'compact' : ''} ${
+        compact && expanded ? 'expanded' : ''
+      }`}
+      onClick={compact && hasOpen ? () => setExpanded((e) => !e) : undefined}
+    >
       {bubbleText && <div className="chat-bubble opp-bubble">{bubbleText}</div>}
       <div className="opp-head">
         <span className="rel-badge">{relation}</span>
         {p.isDealer && '👑 '}
-        {p.name}
+        <span className="opp-name">{p.name}</span>
         {p.isTenpai && <span className="tenpai-badge">聽</span>}
         {p.isXianggong && <span className="xg-badge">相公</span>}
-        <span className="opp-score">{p.score} 頭</span>
-        <span className="opp-money">
-          <img className="money-icon" src={moneyIconUrl(p.money)} alt="" />
-          {p.money} 元
-        </span>
+        {!compact && <span className="opp-score">{p.score} 頭</span>}
+        {!compact && (
+          <span className="opp-money">
+            <img className="money-icon" src={moneyIconUrl(p.money)} alt="" />
+            {p.money} 元
+          </span>
+        )}
         {!p.connected && ' 📴'}
       </div>
-      {/* 公開區（吃牌對子＋死牌單張）＋分隔線＋暗牌，同一列；死牌以單張未成對表示 */}
-      <div className="opp-row">
-        {(p.melds.length > 0 || p.deadCards.length > 0) && (
-          <>
-            <div className="opp-melds">
-              {p.melds.map((pair, i) => (
-                <div className="meld" key={`m${i}`}>
-                  {pair.map((card) => (
-                    <Card key={card.id} card={card} small />
-                  ))}
-                </div>
-              ))}
-              {p.deadCards.map((card) => (
-                <div className="dead-single" key={card.id}>
-                  <Card card={card} small />
-                </div>
+      {/* 緊湊模式第二列：暗牌張數＋頭數＋金額（暗牌不逐張畫，省高度） */}
+      {compact && (
+        <div className="opp-stats">
+          <span className="opp-count">手牌 {p.handCount}</span>
+          <span className="opp-score">{p.score} 頭</span>
+          <span className="opp-money">
+            <img className="money-icon" src={moneyIconUrl(p.money)} alt="" />
+            {p.money}
+          </span>
+        </div>
+      )}
+      {/* 公開區（吃牌對子＋死牌單張）；一般模式再接分隔線＋逐張暗牌，同一列 */}
+      {(hasOpen || !compact) && (
+        <div className="opp-row">
+          {hasOpen && (
+            <>
+              <div className="opp-melds">
+                {p.melds.map((pair, i) => (
+                  <div className="meld" key={`m${i}`}>
+                    {pair.map((card) => (
+                      <Card key={card.id} card={card} small />
+                    ))}
+                  </div>
+                ))}
+                {p.deadCards.map((card) => (
+                  <div className="dead-single" key={card.id}>
+                    <Card card={card} small />
+                  </div>
+                ))}
+              </div>
+              {!compact && <div className="opp-divider" aria-hidden="true" />}
+            </>
+          )}
+          {!compact && (
+            <div className="opp-hand">
+              {Array.from({ length: p.handCount }).map((_, i) => (
+                <Card key={i} faceDown small />
               ))}
             </div>
-            <div className="opp-divider" aria-hidden="true" />
-          </>
-        )}
-        <div className="opp-hand">
-          {Array.from({ length: p.handCount }).map((_, i) => (
-            <Card key={i} faceDown small />
-          ))}
+          )}
         </div>
-      </div>
+      )}
     </div>
   );
 }

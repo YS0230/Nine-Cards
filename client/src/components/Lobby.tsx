@@ -41,6 +41,7 @@ export function Lobby({ api }: { api: GameApi }) {
   const [claimSeconds, setClaimSeconds] = useState(2); // 建房選項：吃牌窗等待秒數
   const [startingCapital, setStartingCapital] = useState(2000); // 建房選項：本金（每位玩家初始金額）
   const [unitBet, setUnitBet] = useState(50); // 建房選項：一頭金額
+  const [maxPlayers, setMaxPlayers] = useState(4); // 建房選項：人數上限（5 人以上採 2D 緊湊版面）
 
   const nameOk = name.trim().length > 0;
 
@@ -108,6 +109,17 @@ export function Lobby({ api }: { api: GameApi }) {
                 ))}
               </select>
             </label>
+            {/* 建房選項：人數上限（超過 4 人為 2D 專用緊湊版面） */}
+            <label className="field-select">
+              <span>人數上限</span>
+              <select value={maxPlayers} onChange={(e) => setMaxPlayers(Number(e.target.value))}>
+                {[2, 3, 4, 5, 6, 7, 8].map((n) => (
+                  <option key={n} value={n}>
+                    {n} 人{n > 4 ? '（僅 2D 版面）' : ''}
+                  </option>
+                ))}
+              </select>
+            </label>
             {/* 建房選項：本金（每位玩家初始金額） */}
             <label className="field-select">
               <span>本金</span>
@@ -136,7 +148,9 @@ export function Lobby({ api }: { api: GameApi }) {
             <button
               className="btn primary"
               disabled={!nameOk}
-              onClick={() => api.createRoom(name, true, hints, claimSeconds, startingCapital, unitBet)}
+              onClick={() =>
+                api.createRoom(name, true, hints, claimSeconds, startingCapital, unitBet, maxPlayers)
+              }
             >
               建立公開房
             </button>
@@ -144,7 +158,9 @@ export function Lobby({ api }: { api: GameApi }) {
               <button
                 className="btn"
                 disabled={!nameOk}
-                onClick={() => api.createRoom(name, false, hints, claimSeconds, startingCapital, unitBet)}
+                onClick={() =>
+                  api.createRoom(name, false, hints, claimSeconds, startingCapital, unitBet, maxPlayers)
+                }
               >
                 建立私人房
               </button>
@@ -189,7 +205,7 @@ export function Lobby({ api }: { api: GameApi }) {
             )}
           </div>
 
-          <p className="hint">最少 2 人、最多 4 人。同一局湊滿五對即胡牌。</p>
+          <p className="hint">最少 2 人、最多 8 人（5 人以上採 2D 版面）。同一局湊滿五對即胡牌。</p>
         </>
       )}
 

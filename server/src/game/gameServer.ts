@@ -10,7 +10,10 @@ import type {
   ChatMessage,
 } from '@nine-cards/shared';
 
-const MAX_PLAYERS = 4;
+// 房間人數上限為建房選項（2–8）：牌共 112 張、發牌 9k+1、流局底留 9 張，
+// 8 人局仍有約 30 張可摸；超過 8 人牌堆過薄，遊戲節奏不成立
+const DEFAULT_MAX_PLAYERS = 4;
+const MAX_PLAYERS_LIMIT = 8;
 const MIN_PLAYERS = 2;
 const DEFAULT_STARTING_CAPITAL = 2000; // 本金預設值（元）
 const DEFAULT_UNIT_BET = 50; // 一頭預設值（元）
@@ -36,6 +39,7 @@ export interface Room {
   isPublic: boolean;
   hints: boolean; // 新手提示（建房時選擇）：開＝伺服器預檢吃/胡、前端鎖定按鈕
   claimMs: number; // 吃牌窗等待毫秒（建房時選擇秒數）
+  maxPlayers: number; // 房間人數上限（建房時選擇，2–8）
   startingCapital: number; // 本金：每位玩家初始金額（建房時選擇）
   unitBet: number; // 一頭金額：頭數換算成錢的單價（建房時選擇）
   phase: RoomPhase;
@@ -144,6 +148,7 @@ export class GameServer {
     claimSeconds?: number,
     startingCapital?: number,
     unitBet?: number,
+    maxPlayers?: number,
   ): JoinOutcome {
     this.detachSocket(socketId); // 先清掉同連線的舊身分，避免殘留幽靈玩家
     const id = randomUUID();
@@ -158,12 +163,19 @@ export class GameServer {
     const cap = Number.isFinite(capital) && capital > 0 ? Math.round(capital) : DEFAULT_STARTING_CAPITAL;
     const bet = Number(unitBet);
     const unit = Number.isFinite(bet) && bet > 0 ? Math.round(bet) : DEFAULT_UNIT_BET;
+    // 人數上限（建房選項）：限制 2–8，非法值回落預設
+    const mp = Number(maxPlayers);
+    const max =
+      Number.isFinite(mp) && mp >= MIN_PLAYERS && mp <= MAX_PLAYERS_LIMIT
+        ? Math.round(mp)
+        : DEFAULT_MAX_PLAYERS;
     const room: Room = {
       id,
       code,
       isPublic,
       hints,
       claimMs,
+      maxPlayers: max,
       startingCapital: cap,
       unitBet: unit,
       phase: 'WAITING',
@@ -195,7 +207,7 @@ export class GameServer {
     const room = this.rooms.get(roomId);
     if (!room) return { ok: false, error: '房間不存在' };
     if (room.phase !== 'WAITING') return { ok: false, error: '牌局已開始，無法加入' };
-    if (room.players.length >= MAX_PLAYERS) return { ok: false, error: '房間已滿' };
+    if (room.players.length >= room.maxPlayers) return { ok: false, error: '房間已滿' };
     const player = this.newPlayer(name, socketId, room.players.length);
     room.players.push(player);
     this.tokenIndex.set(player.token, { roomId: room.id, playerId: player.id });
@@ -209,7 +221,7 @@ export class GameServer {
       if (
         room.isPublic &&
         room.phase === 'WAITING' &&
-        room.players.length < MAX_PLAYERS &&
+        room.players.length < room.maxPlayers &&
         room.players.some((p) => p.connected)
       ) {
         return this.joinRoom(room.id, name, socketId);
@@ -555,13 +567,13 @@ export class GameServer {
     for (const room of this.rooms.values()) {
       if (!room.isPublic || !room.players.some((p) => p.connected)) continue;
       const waiting = room.phase === 'WAITING';
-      if (waiting && room.players.length >= MAX_PLAYERS) continue;
+      if (waiting && room.players.length >= room.maxPlayers) continue;
       if (!waiting && room.phase !== 'PLAYING' && room.phase !== 'FINISHED') continue;
       list.push({
         code: room.code,
         hostName: room.players.find((p) => p.id === room.hostId)?.name ?? '房主',
         count: room.players.length,
-        maxPlayers: MAX_PLAYERS,
+        maxPlayers: room.maxPlayers,
         inGame: !waiting,
       });
     }
@@ -569,7 +581,7 @@ export class GameServer {
   }
 
   roomView(room: Room): RoomView {
-    const seats = Array.from({ length: MAX_PLAYERS }, (_, i) => {
+    const seats = Array.from({ length: room.maxPlayers }, (_, i) => {
       const p = room.players[i];
       return p
         ? { playerId: p.id, name: p.name, connected: p.connected }
@@ -586,7 +598,7 @@ export class GameServer {
       unitBet: room.unitBet,
       seats,
       hostId: room.hostId,
-      maxPlayers: MAX_PLAYERS,
+      maxPlayers: room.maxPlayers,
     };
   }
 }

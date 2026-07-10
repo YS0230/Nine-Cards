@@ -385,6 +385,87 @@ body {
   --ov: 12px; /* 對手 meld 的牌寬 24px，覆蓋量取一半 */
 }
 
+/* ── 2D 主區容器：≤4 人上下堆疊（對手橫列＋桌面）；五人以上（.side）左右並排 ── */
+.table-main {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.table-main.side {
+  flex-direction: row;
+}
+/* 左欄：對手直排、全員同屏（超出才垂直捲動），寬度固定讓桌面吃剩餘寬度 */
+.table-main.side .opponents {
+  flex-direction: column;
+  justify-content: flex-start;
+  flex: 0 0 154px;
+  max-height: none;
+  overflow-x: hidden;
+  overflow-y: auto;
+  gap: 6px;
+  padding: 6px;
+}
+.table-main.side .center {
+  min-width: 0;
+}
+
+/* ── 五人以上的緊湊對手卡：名字列＋張數/頭數列＋縮小的公開區（點卡展開） ── */
+.opp.compact {
+  min-width: 0;
+  flex: 0 0 auto;
+  padding: 6px 7px;
+}
+.opp.compact .opp-head {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  margin-bottom: 2px;
+  min-width: 0;
+}
+.opp.compact .opp-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.opp-stats {
+  display: flex;
+  flex-wrap: wrap; /* 窄欄放不下時整項換行，不讓「手牌 9」這種字內折行 */
+  align-items: center;
+  column-gap: 8px;
+  row-gap: 2px;
+  font-size: 12px;
+  opacity: 0.92;
+}
+.opp-stats > span {
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.opp.compact .opp-row {
+  max-width: none;
+  margin-top: 3px;
+}
+/* 公開區迷你牌面：先看得出「有哪些對子/死牌」；點卡展開放大看清楚 */
+.opp.compact .opp-melds .card {
+  width: 18px;
+  height: 32px;
+  border-radius: 3px;
+}
+.opp.compact .opp-melds .meld {
+  --ov: 9px;
+}
+.opp.compact.expanded .opp-melds .card {
+  width: 34px;
+  height: 60px;
+  border-radius: 5px;
+}
+.opp.compact.expanded .opp-melds .meld {
+  --ov: 17px;
+}
+
 .center {
   flex: 1 1 auto;
   min-height: 0;
@@ -860,9 +941,30 @@ body {
 }
 
 /* ── 決定莊家（§4.1）抽牌面板 ─────────────────── */
+.dealer-draw {
+  max-height: 92vh;
+  overflow-y: auto; /* 內容再多也不超出畫面（保險；多人已改雙欄） */
+}
 .dealer-draw .dd-hint {
   font-size: 13px;
   opacity: 0.75;
+}
+/* 五人以上：一人一列改成雙欄格狀，八人也能一屏放下 */
+.dealer-draw.many .dd-rows {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+.dealer-draw.many .dd-row {
+  gap: 8px;
+  padding: 4px 8px;
+  min-width: 0;
+}
+.dealer-draw.many .dd-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .dd-rows {
   display: flex;

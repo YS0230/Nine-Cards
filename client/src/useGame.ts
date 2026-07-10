@@ -49,6 +49,7 @@ export interface GameApi {
     claimSeconds?: number,
     startingCapital?: number,
     unitBet?: number,
+    maxPlayers?: number,
   ) => void;
   joinRoom: (code: string, name: string) => void;
   quickMatch: (name: string) => void;
@@ -167,11 +168,12 @@ export function useGame(): GameApi {
       claimSeconds?: number,
       startingCapital?: number,
       unitBet?: number,
+      maxPlayers?: number,
     ) => {
       remember(name);
       socketRef.current?.emit(
         EVT.CREATE_ROOM,
-        { name, isPublic, hints, claimSeconds, startingCapital, unitBet },
+        { name, isPublic, hints, claimSeconds, startingCapital, unitBet, maxPlayers },
         onJoin,
       );
     },

@@ -48,6 +48,7 @@ export interface CreateRoomReq {
   claimSeconds?: number; // 吃牌窗等待秒數（1–30；未給或非法值用伺服器預設）
   startingCapital?: number; // 本金（每位玩家初始金額，預設 2000；未給或非法值用伺服器預設）
   unitBet?: number; // 一頭金額（頭數換算成錢的單價，預設 50；未給或非法值用伺服器預設）
+  maxPlayers?: number; // 房間人數上限（2–8，預設 4；未給或非法值用伺服器預設）
 }
 export interface JoinRoomReq {
   code: string;

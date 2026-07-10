@@ -113,6 +113,7 @@ io.on('connection', (socket) => {
       req?.claimSeconds,
       req?.startingCapital,
       req?.unitBet,
+      req?.maxPlayers,
     );
     if (!r.ok || !r.room || !r.player) return respond(ack, { ok: false, error: r.error });
     socket.leave('lobby');
