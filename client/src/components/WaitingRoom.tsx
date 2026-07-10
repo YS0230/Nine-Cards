@@ -1,4 +1,5 @@
 import type { GameApi } from '../useGame.js';
+import { ChatPanel } from './ChatPanel.js';
 
 export function WaitingRoom({ api }: { api: GameApi }) {
   const room = api.room!;
@@ -41,6 +42,14 @@ export function WaitingRoom({ api }: { api: GameApi }) {
           </li>
         ))}
       </ul>
+
+      {/* 等待室聊天：空間充裕，面板常駐 inline */}
+      <ChatPanel
+        messages={api.chat}
+        myPlayerId={me?.playerId ?? null}
+        onSend={api.sendChat}
+        inline
+      />
 
       {isHost ? (
         <button className="btn primary" disabled={!canStart} onClick={api.startGame}>

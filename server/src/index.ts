@@ -13,6 +13,8 @@ import {
   type ResumeReq,
   type ActionReq,
   type JoinResult,
+  type ChatReq,
+  type ChatMessage,
 } from '@nine-cards/shared';
 
 const PORT = Number(process.env.PORT ?? 3001);
@@ -39,6 +41,13 @@ if (existsSync(clientDist)) {
 // 把最新公開大廳清單推給所有在「大廳」的連線
 function broadcastLobby() {
   io.to('lobby').emit(EVT.LOBBY_UPDATE, game.publicLobby());
+}
+
+// 把一則聊天訊息推給房內每位在線玩家
+function broadcastChat(room: Room, msg: ChatMessage) {
+  for (const p of room.players) {
+    if (p.connected && p.socketId) io.to(p.socketId).emit(EVT.CHAT_MSG, msg);
+  }
 }
 
 // 依房間階段，把最新狀態推送給每位「連線中的」玩家
@@ -117,6 +126,7 @@ io.on('connection', (socket) => {
     if (!r.ok || !r.room || !r.player) return respond(ack, { ok: false, error: r.error });
     socket.leave('lobby');
     respond(ack, joinResult(r.room, r.player));
+    sendChatHistory(socket.id, r.room);
     pushState(r.room);
     broadcastLobby();
   });
@@ -126,6 +136,7 @@ io.on('connection', (socket) => {
     if (!r.ok || !r.room || !r.player) return respond(ack, { ok: false, error: r.error });
     socket.leave('lobby');
     respond(ack, joinResult(r.room, r.player));
+    sendChatHistory(socket.id, r.room);
     pushState(r.room);
     broadcastLobby();
   });
@@ -134,6 +145,7 @@ io.on('connection', (socket) => {
     const r = game.resume(req?.token ?? '', socket.id);
     if (!r.ok || !r.room || !r.player) return respond(ack, { ok: false, error: r.error });
     respond(ack, joinResult(r.room, r.player));
+    sendChatHistory(socket.id, r.room);
     pushState(r.room);
   });
 
@@ -162,6 +174,12 @@ io.on('connection', (socket) => {
     broadcastLobby();
   });
 
+  socket.on(EVT.SEND_CHAT, (playerId: string, req: ChatReq) => {
+    const r = game.chat(playerId, req?.text ?? '');
+    if (!r.ok) return emitError(socket.id, r.error);
+    if (r.room && r.msg) broadcastChat(r.room, r.msg);
+  });
+
   socket.on('disconnect', () => {
     for (const room of game.markDisconnected(socket.id)) pushState(room);
     broadcastLobby(); // 公開房人數/存在可能改變
@@ -174,6 +192,11 @@ function joinResult(room: Room, player: { id: string; token: string }): JoinResu
 
 function emitError(socketId: string, message?: string) {
   io.to(socketId).emit(EVT.ERROR_MSG, { message: message ?? '發生錯誤' });
+}
+
+// 加入／重連成功後補發整段聊天記錄，讓中途加入者也看得到之前的訊息
+function sendChatHistory(socketId: string, room: Room) {
+  if (room.chatLog.length) io.to(socketId).emit(EVT.CHAT_HISTORY, room.chatLog);
 }
 
 httpServer.listen(PORT, () => {

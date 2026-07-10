@@ -19,6 +19,7 @@ export const EVT = {
   LEAVE: 'leave',
   WATCH_LOBBY: 'watchLobby',
   UNWATCH_LOBBY: 'unwatchLobby',
+  SEND_CHAT: 'sendChat', // 房間內聊天訊息
   // Server → Client
   ROOM_UPDATE: 'roomUpdate',
   GAME_STATE: 'gameState',
@@ -26,6 +27,8 @@ export const EVT = {
   GAME_ENDED: 'gameEnded', // 整場結束（有人離開）→ 顯示最終計分版
   ERROR_MSG: 'errorMsg',
   LOBBY_UPDATE: 'lobbyUpdate',
+  CHAT_MSG: 'chatMsg', // 單則聊天訊息廣播
+  CHAT_HISTORY: 'chatHistory', // 加入／重連時補發整段聊天記錄
 } as const;
 
 // ── Client → Server payloads ─────────────────────────────
@@ -60,9 +63,20 @@ export interface ActionReq {
   type: ActionType;
   cardId?: string; // discard/eat 時指定的牌
 }
+export interface ChatReq {
+  text: string;
+}
 
 // ── Server → Client payloads ─────────────────────────────
 export type { PersonalGameState, RoomView, GameOverPayload, GameEndedPayload };
 export interface ErrorPayload {
   message: string;
+}
+// 聊天訊息（CHAT_MSG 單則廣播；CHAT_HISTORY 為 ChatMessage[]）
+export interface ChatMessage {
+  playerId: string;
+  name: string;
+  seat: number; // 客戶端用來定位對話氣泡
+  text: string;
+  ts: number; // epoch ms
 }

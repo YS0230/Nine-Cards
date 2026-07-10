@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { GameApi } from '../useGame.js';
 import { Card } from './Card.js';
+import { ChatPanel } from './ChatPanel.js';
 import { Scene3D } from '../three/Scene3D.js';
 import { playCardVoice, playEffect } from '../sound.js';
 import { moneyIconUrl } from '../money.js';
@@ -184,6 +185,31 @@ export function Table({ api }: { api: GameApi }) {
     return () => window.clearTimeout(timer.current);
   }, [g]);
 
+  // ── 聊天：收合面板（header 聊天鈕＋未讀數）＋ 新訊息在對應玩家旁短暫顯示氣泡 ──
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatRead, setChatRead] = useState(api.chat.length); // 已讀到第幾則
+  useEffect(() => {
+    if (chatOpen) setChatRead(api.chat.length); // 面板開著 → 隨時視為已讀
+  }, [chatOpen, api.chat.length]);
+  const unread = chatOpen ? 0 : Math.max(0, api.chat.length - chatRead);
+  // 對話氣泡：只顯示最新一則，4 秒後消失（比照 reveal 翻牌層做法）
+  const [bubble, setBubble] = useState<{ seat: number; text: string } | null>(null);
+  const prevChatLen = useRef(api.chat.length);
+  const bubbleTimer = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    if (api.chat.length > prevChatLen.current) {
+      const m = api.chat[api.chat.length - 1];
+      // CHAT_HISTORY 整段補發（重連）也會讓長度增加：只有「剛剛」的訊息才跳氣泡
+      if (Date.now() - m.ts < 3000) {
+        setBubble({ seat: m.seat, text: m.text });
+        window.clearTimeout(bubbleTimer.current);
+        bubbleTimer.current = window.setTimeout(() => setBubble(null), 4000);
+      }
+    }
+    prevChatLen.current = api.chat.length;
+  }, [api.chat]);
+  useEffect(() => () => window.clearTimeout(bubbleTimer.current), []);
+
   // 輪到你浮層提示：輪到你且尚未摸牌時，等 1 秒還沒摸才顯示；摸完牌（canDraw 變 false）就收起
   const [showTurnBanner, setShowTurnBanner] = useState(false);
   const turnStartRef = useRef<number | null>(null);
@@ -252,6 +278,10 @@ export function Table({ api }: { api: GameApi }) {
         <span className={`chip turn ${myTurn ? 'me' : ''}`}>
           {myTurn ? '輪到你' : `輪到 ${turnName}`}
         </span>
+        <button className="chip chat-chip" onClick={() => setChatOpen((o) => !o)} aria-label="聊天">
+          💬
+          {unread > 0 && <span className="chat-chip-badge">{unread > 9 ? '9+' : unread}</span>}
+        </button>
         <button className="chip" onClick={toggleView}>
           {view3d ? '2D' : '3D'}
         </button>
@@ -295,6 +325,7 @@ export function Table({ api }: { api: GameApi }) {
                 {p.isXianggong && <span className="xg-badge">相公</span>}
                 <span className="opp-score">{p.score} 頭</span>
                 {!p.connected && ' 📴'}
+                {bubble?.seat === p.seat && <div className="chat-bubble s3-bubble">{bubble.text}</div>}
               </div>
             ))}
           </div>
@@ -328,6 +359,7 @@ export function Table({ api }: { api: GameApi }) {
                 p={p}
                 relation={relationOf(p.seat)}
                 active={p.seat === g.currentTurnSeat}
+                bubbleText={bubble?.seat === p.seat ? bubble.text : undefined}
               />
             ))}
           </section>
@@ -381,8 +413,20 @@ export function Table({ api }: { api: GameApi }) {
         </>
       )}
 
+      {/* 聊天浮動面板：掛在 .table 層（2D/3D 共用），貼在手牌區上方 */}
+      {chatOpen && (
+        <ChatPanel
+          messages={api.chat}
+          myPlayerId={api.identity?.playerId ?? null}
+          onSend={api.sendChat}
+          onClose={() => setChatOpen(false)}
+        />
+      )}
+
       {/* 我的區域：固定高度，melds 保留空間、動作列固定不跳動 */}
       <section className="me">
+        {/* 自己的聊天氣泡：絕對定位在手牌區上緣，不佔版面 */}
+        {bubble?.seat === mySeat && <div className="chat-bubble me-bubble">{bubble.text}</div>}
         {/* 公開區（吃牌對子＋死牌單張）｜分隔線｜暗手牌，同一列、同尺寸、依寬度自動縮放
             （3D 模式下手牌畫在場景裡，這一列不顯示） */}
         {!view3d && (
@@ -881,13 +925,16 @@ function OpponentSeat({
   p,
   relation,
   active,
+  bubbleText,
 }: {
   p: PublicPlayer;
   relation: string; // 相對位置：上家／對家／下家
   active: boolean;
+  bubbleText?: string; // 這位玩家剛說的話（短暫顯示的對話氣泡）
 }) {
   return (
     <div className={`opp ${active ? 'active' : ''}`}>
+      {bubbleText && <div className="chat-bubble opp-bubble">{bubbleText}</div>}
       <div className="opp-head">
         <span className="rel-badge">{relation}</span>
         {p.isDealer && '👑 '}

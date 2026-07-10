@@ -1,12 +1,22 @@
 // 房間、配對與玩家身分管理（不直接碰 socket，交由 index.ts 廣播）
 import { randomUUID } from 'node:crypto';
 import { CLAIM_WINDOW_MS, GameEngine, type SeatInit } from './engine.js';
-import type { ActionType, RoomView, RoomPhase, LobbyRoom, GameEndedPayload } from '@nine-cards/shared';
+import type {
+  ActionType,
+  RoomView,
+  RoomPhase,
+  LobbyRoom,
+  GameEndedPayload,
+  ChatMessage,
+} from '@nine-cards/shared';
 
 const MAX_PLAYERS = 4;
 const MIN_PLAYERS = 2;
 const DEFAULT_STARTING_CAPITAL = 2000; // 本金預設值（元）
 const DEFAULT_UNIT_BET = 50; // 一頭預設值（元）
+const CHAT_LOG_MAX = 50; // 聊天記錄保留則數上限
+const CHAT_TEXT_MAX = 100; // 單則聊天訊息字數上限
+const CHAT_COOLDOWN_MS = 500; // 兩次發言最短間隔（防洗頻）
 // 全員離線後房間的保留寬限時間：手機切換 APP／鎖屏造成的短暫斷線，可在此時間內重連回來
 const EMPTY_ROOM_GRACE_MS = Number(process.env.EMPTY_ROOM_GRACE_MS ?? 120_000);
 
@@ -17,6 +27,7 @@ export interface Player {
   seat: number; // 座位索引（開局後 0..k-1）
   socketId: string | null;
   connected: boolean;
+  lastChatAt?: number; // 上次發言時間（防洗頻）
 }
 
 export interface Room {
@@ -43,6 +54,7 @@ export interface Room {
   paused: boolean; // 有玩家斷線 → 全體暫停等待重連（凍結計時器、擋動作）
   pausedAt?: number; // 進入暫停的時間點，重連時據以把凍結的計時器整體後移
   endResult?: GameEndedPayload; // 整場結束（有人離開）的最終計分版（ENDED 階段）
+  chatLog: ChatMessage[]; // 房間聊天記錄（保留最近 CHAT_LOG_MAX 則，房間回收即消失）
 }
 
 export interface ActionResult {
@@ -87,6 +99,30 @@ export class GameServer {
       if (r.players.some((p) => p.id === playerId)) return r;
     }
     return undefined;
+  }
+
+  // 房間內聊天：驗證後寫入 chatLog，訊息本體交由 index.ts 廣播（本類不碰 socket）
+  chat(playerId: string, text: string): { ok: boolean; error?: string; room?: Room; msg?: ChatMessage } {
+    const room = this.findRoomByPlayer(playerId);
+    const player = room?.players.find((p) => p.id === playerId);
+    if (!room || !player) return { ok: false, error: '你不在任何房間中' };
+    const trimmed = String(text ?? '').trim().slice(0, CHAT_TEXT_MAX);
+    if (!trimmed) return { ok: false, error: '訊息不能是空白' };
+    const now = Date.now();
+    if (player.lastChatAt != null && now - player.lastChatAt < CHAT_COOLDOWN_MS) {
+      return { ok: false, error: '說話太快了，稍等一下' };
+    }
+    player.lastChatAt = now;
+    const msg: ChatMessage = {
+      playerId: player.id,
+      name: player.name,
+      seat: player.seat,
+      text: trimmed,
+      ts: now,
+    };
+    room.chatLog.push(msg);
+    if (room.chatLog.length > CHAT_LOG_MAX) room.chatLog.shift();
+    return { ok: true, room, msg };
   }
 
   private newPlayer(name: string, socketId: string, seat: number): Player {
@@ -140,6 +176,7 @@ export class GameServer {
       settled: false,
       readyIds: new Set(),
       paused: false,
+      chatLog: [],
     };
     this.rooms.set(id, room);
     this.codeIndex.set(code, id);

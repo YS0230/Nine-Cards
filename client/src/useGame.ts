@@ -9,6 +9,7 @@ import {
   type ActionType,
   type JoinResult,
   type LobbyRoom,
+  type ChatMessage,
 } from '@nine-cards/shared';
 
 // 開發模式下前端(5173)與 server(3001)不同埠，需指定位址；
@@ -40,6 +41,7 @@ export interface GameApi {
   toast: string | null;
   savedName: string;
   lobby: LobbyRoom[];
+  chat: ChatMessage[];
   createRoom: (
     name: string,
     isPublic?: boolean,
@@ -55,6 +57,7 @@ export interface GameApi {
   startGame: () => void;
   act: (type: ActionType, cardId?: string) => void;
   readyContinue: () => void;
+  sendChat: (text: string) => void;
   clearToast: () => void;
   leave: () => void;
 }
@@ -70,6 +73,7 @@ export function useGame(): GameApi {
   const [gameEnded, setGameEnded] = useState<GameEndedPayload | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [lobby, setLobby] = useState<LobbyRoom[]>([]);
+  const [chat, setChat] = useState<ChatMessage[]>([]);
   const savedName = localStorage.getItem(LS_NAME) ?? '';
 
   useEffect(() => {
@@ -103,6 +107,8 @@ export function useGame(): GameApi {
     socket.on(EVT.GAME_ENDED, (payload: GameEndedPayload) => setGameEnded(payload)); // 整場結束 → 最終計分版
     socket.on(EVT.ERROR_MSG, (p: { message: string }) => setToast(p.message));
     socket.on(EVT.LOBBY_UPDATE, (list: LobbyRoom[]) => setLobby(list));
+    socket.on(EVT.CHAT_MSG, (m: ChatMessage) => setChat((prev) => [...prev.slice(-49), m]));
+    socket.on(EVT.CHAT_HISTORY, (list: ChatMessage[]) => setChat(list)); // 加入/重連 → 整段補發
 
     return () => {
       document.removeEventListener('visibilitychange', onVisibilityChange);
@@ -118,6 +124,7 @@ export function useGame(): GameApi {
       return;
     }
     localStorage.setItem(LS_TOKEN, res.token);
+    setChat([]); // 換房 → 清掉舊聊天記錄（新房記錄由 CHAT_HISTORY 補發）
     setIdentity({
       playerId: res.playerId,
       token: res.token,
@@ -136,6 +143,7 @@ export function useGame(): GameApi {
       setGame(null);
       setGameOver(null);
       setGameEnded(null);
+      setChat([]);
       setScreen('home');
       if (res.error) setToast(res.error);
       return;
@@ -197,6 +205,12 @@ export function useGame(): GameApi {
   const readyContinue = useCallback(() => {
     if (identity) socketRef.current?.emit(EVT.CONTINUE, identity.playerId); // §13：全員按繼續才開下一局
   }, [identity]);
+  const sendChat = useCallback(
+    (text: string) => {
+      if (identity) socketRef.current?.emit(EVT.SEND_CHAT, identity.playerId, { text });
+    },
+    [identity],
+  );
   const leave = useCallback(() => {
     if (identity) socketRef.current?.emit(EVT.LEAVE, identity.playerId); // 離開此場遊戲（對局中→整場結束）
     localStorage.removeItem(LS_TOKEN);
@@ -205,6 +219,7 @@ export function useGame(): GameApi {
     setGame(null);
     setGameOver(null);
     setGameEnded(null);
+    setChat([]);
     setScreen('home');
   }, [identity]);
 
@@ -221,6 +236,7 @@ export function useGame(): GameApi {
     toast,
     savedName,
     lobby,
+    chat,
     createRoom,
     joinRoom,
     quickMatch,
@@ -229,6 +245,7 @@ export function useGame(): GameApi {
     startGame,
     act,
     readyContinue,
+    sendChat,
     clearToast,
     leave,
   };
