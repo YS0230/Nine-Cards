@@ -24,18 +24,21 @@ export function colorScore(owned: Card[]): number {
 }
 
 /**
- * 胡開加頭（§10.1）。winningCard 為胡的那張牌；只有胡到「第 4 張相同」才算：
- *  - 原本 3 張全在暗手牌（聽最後一張）→ 加 5 頭。
- *  - 原本 3 張中有來自吃牌（melds，吃到四張相同）→ 加 1 頭。
- * 天胡／開手胡（無 winningCard）不適用。
+ * 胡開加頭（§10.1），兩種情境可並存（相加）：
+ *  - 胡到「第 4 張相同」（winningCard 為胡的那張）：
+ *    原本 3 張全在暗手牌（聽最後一張）→ 加 5 頭；原本 3 張中有來自吃牌 → 加 1 頭。
+ *    天胡／開手胡（無 winningCard）不適用。
+ *  - 胡牌之前就吃牌達到四張相同（持 3 吃第 4，melds 中的 4 張牌組）→ 每組加 1 頭。
  */
 export function huKaiBonus(handBefore: Card[], melds: Card[][], winningCard: Card | null): number {
-  if (!winningCard) return 0;
+  // 吃滿四張的牌組（只可能由「持 3 張吃第 4 張」產生）每組 +1
+  let bonus = melds.filter((m) => m.length === 4).length;
+  if (!winningCard) return bonus;
   const key = kindKey(winningCard);
   const inHand = handBefore.filter((c) => kindKey(c) === key).length;
   const inMelds = melds.flat().filter((c) => kindKey(c) === key).length;
-  if (inHand + inMelds !== 3) return 0; // 胡的必須是第 4 張
-  return inMelds === 0 ? 5 : 1;
+  if (inHand + inMelds !== 3) return bonus; // 胡開另需胡的是第 4 張
+  return bonus + (inMelds === 0 ? 5 : 1);
 }
 
 /**

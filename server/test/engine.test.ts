@@ -230,6 +230,46 @@ describe('吃牌窗（tentative eat / 搶吃 / 下家摸牌）', () => {
   });
 });
 
+describe('持三張吃第四張（§8：四張全公開、排成一組）', () => {
+  const tripleHand = () => [c('黃', '帥', 1), c('黃', '帥', 2), c('黃', '帥', 3), c('綠', '將')];
+
+  it('按吃 → 三張連同吃進的牌成一組 4 張公開、暗手牌少 3 張', () => {
+    const eng = makeClaim(2, [1], 0);
+    eng.players[1].hand = tripleHand();
+    const r = eng.apply('1', 'eat');
+    expect(r.ok).toBe(true);
+    expect(eng.stage).toBe('EATING');
+    expect(eng.players[1].melds).toHaveLength(1);
+    expect(eng.players[1].melds[0]).toHaveLength(4); // 四張排成一組
+    expect(eng.players[1].melds[0].every((x) => x.color === '黃' && x.rank === '帥')).toBe(true);
+    expect(eng.players[1].hand).toHaveLength(1); // 只剩 綠將
+    const view = eng.viewFor('0');
+    expect(view.players.find((p) => p.id === '1')!.handCount).toBe(1);
+  });
+
+  it('高優先者搶吃 → 三張完整還原回暗手牌', () => {
+    const eng = makeClaim(3, [2, 1], 0);
+    eng.players[1].hand = tripleHand();
+    eng.players[2].hand = [c('黃', '帥', 4), c('白', '卒')];
+    eng.apply('1', 'eat'); // 低優先先吃（4 張公開）
+    eng.apply('2', 'eat'); // 高優先搶
+    expect(eng.eatHolder).toBe(2);
+    expect(eng.players[1].melds).toHaveLength(0);
+    expect(eng.players[1].hand).toHaveLength(4); // 三張帥＋綠將全數歸還
+    expect(eng.players[1].hand.filter((x) => x.rank === '帥')).toHaveLength(3);
+  });
+
+  it('吃牌者打出 → 提交，4 張牌組保留', () => {
+    const eng = makeClaim(2, [1], 0);
+    eng.players[1].hand = [...tripleHand(), c('綠', '士')];
+    eng.apply('1', 'eat');
+    const r = eng.apply('1', 'discard', eng.players[1].hand[0].id);
+    expect(r.ok).toBe(true);
+    expect(eng.players[1].melds[0]).toHaveLength(4);
+    expect(eng.eatHolder).toBeNull();
+  });
+});
+
 // 與 winningNine 不撞 id 的另一副聽 黃帥 的手牌（一炮多響用）
 const winningNineAlt = () => [
   c('黃', '帥', 3),

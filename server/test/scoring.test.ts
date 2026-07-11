@@ -40,6 +40,15 @@ describe('胡開 huKaiBonus（§10.1）', () => {
   it('無胡牌張（天胡）→ 0', () => {
     expect(huKaiBonus([c('黃', '帥', 1)], [], null)).toBe(0);
   });
+  it('胡牌前就吃滿四張（4 張 meld）、胡別種牌 → 加 1 頭', () => {
+    const melds = [[c('黃', '帥', 1), c('黃', '帥', 2), c('黃', '帥', 3), c('黃', '帥', 4)]];
+    expect(huKaiBonus([c('紅', '仕', 1)], melds, c('紅', '仕', 2))).toBe(1);
+  });
+  it('吃滿四張＋暗手三張胡第 4 張 → 兩者並存相加（1 + 5）', () => {
+    const melds = [[c('黃', '帥', 1), c('黃', '帥', 2), c('黃', '帥', 3), c('黃', '帥', 4)]];
+    const handBefore = [c('紅', '仕', 1), c('紅', '仕', 2), c('紅', '仕', 3)];
+    expect(huKaiBonus(handBefore, melds, c('紅', '仕', 4))).toBe(6);
+  });
 });
 
 describe('抽五隻 drawFiveBonus（§9.2，符合條件＝與胡牌牌組任一種同種）', () => {

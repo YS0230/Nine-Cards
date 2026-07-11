@@ -641,7 +641,7 @@ export class TableScene {
       for (const [j, card] of pair.entries()) {
         push(`c:${card.id}`, card, new THREE.Vector3(px + j * 0.44, 0.03, MY_PUBLIC_Z), quatFlatUp(0.03 * (i % 2 ? 1 : -1)), { spawn: mySpawn });
       }
-      px += 0.44 + 0.68;
+      px += 0.44 * pair.length + 0.24; // 依組長推進（持 3 吃 4 的牌組為 4 張）
     }
     for (const card of myDead) {
       if (card.id === eatingId) continue;

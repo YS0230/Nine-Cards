@@ -48,7 +48,7 @@ export interface PublicPlayer {
   name: string;
   seat: number;
   handCount: number; // 只給暗牌張數，不給內容
-  melds: Card[][]; // 已公開的吃牌對子
+  melds: Card[][]; // 已公開的吃牌組（一般為對子；持 3 吃第 4 時為 4 張一組，§8）
   deadCards: Card[]; // 死牌（公開，等待配對或打出，§7.2）
   connected: boolean;
   isDealer: boolean;

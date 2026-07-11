@@ -8,6 +8,7 @@
 //  - 下一家要「兩秒後且無人宣告」才可以摸牌；即使超過兩秒，只要下一家還沒摸牌，仍可按吃。
 //  - 吃是「暫定」的：吃牌者尚未打出前，優先權更高的玩家仍可按吃搶走，低優先者讓出。
 //    依座位順序決定優先（胡 > 吃、下家優先）。
+//  - 手中同種 3 張時吃第 4 張：四張全公開、排成一組（§8）；之後胡牌時胡開 +1 頭（§10.1）。
 //  - 自摸最高優先：多家聽同一張時，摸牌者能胡自己摸的牌 → 由摸牌者先決定（不限時），
 //    他家要等摸牌者胡／吃／不吃之後才有機會宣告。
 //  - 一炮多響（§9.1）：多家能胡同一張時優先權依座位順序（下家優先）。宣告者不是目前
@@ -46,7 +47,7 @@ interface EnginePlayer {
   name: string;
   seat: number;
   hand: Card[]; // 暗手牌（死牌也仍留在 hand，另以 deadIds 標記並公開）
-  melds: Card[][]; // 已公開吃牌對子
+  melds: Card[][]; // 已公開的吃牌組（一般為對子；持 3 吃第 4 為 4 張一組）
   deadIds: string[]; // 死牌在 hand 中的 id，FIFO 順序（§7.2/7.3）
   connected: boolean;
   isDealer: boolean;
@@ -96,9 +97,8 @@ interface Pending {
 
 interface Tentative {
   seat: number;
-  meldIndex: number; // 暫定對子在該玩家 melds 中的索引
-  match: Card; // 從手牌拿出來配對的那張
-  matchWasDead: boolean; // 配對牌原本是死牌（被搶時需還原死牌狀態）
+  meldIndex: number; // 暫定牌組在該玩家 melds 中的索引
+  matches: { card: Card; wasDead: boolean }[]; // 從手牌拿出配對的牌（持 3 吃 4 時為 3 張；被搶時需逐張還原）
 }
 
 export interface ApplyResult {
@@ -360,15 +360,27 @@ export class GameEngine {
   private formTentativeEat(seat: number) {
     const card = this.pending!.card;
     const p = this.players[seat];
-    // 優先用死牌配對（讓死牌就地成對、解除死牌狀態，§7.2）
-    let matchIdx = p.hand.findIndex((c) => isPair(c, card) && p.deadIds.includes(c.id));
-    if (matchIdx < 0) matchIdx = p.hand.findIndex((c) => isPair(c, card));
-    const [match] = p.hand.splice(matchIdx, 1);
-    const dIdx = p.deadIds.indexOf(match.id);
-    const matchWasDead = dIdx >= 0;
-    if (matchWasDead) p.deadIds.splice(dIdx, 1);
-    p.melds.push([match, card]); // 暫定公開對子
-    this.tentative = { seat, meldIndex: p.melds.length - 1, match, matchWasDead };
+    // 手中同種 3 張時吃第 4 張：三張全部取出，與吃進的牌排成一組 4 張公開（§8）；
+    // 一般情況取 1 張成對，優先用死牌配對（讓死牌就地成對、解除死牌狀態，§7.2）
+    const sameKind = p.hand.filter((c) => isPair(c, card)).length;
+    const matches: { card: Card; wasDead: boolean }[] = [];
+    const takeMatch = (preferDead: boolean) => {
+      let idx = preferDead
+        ? p.hand.findIndex((c) => isPair(c, card) && p.deadIds.includes(c.id))
+        : -1;
+      if (idx < 0) idx = p.hand.findIndex((c) => isPair(c, card));
+      const [match] = p.hand.splice(idx, 1);
+      const dIdx = p.deadIds.indexOf(match.id);
+      if (dIdx >= 0) p.deadIds.splice(dIdx, 1);
+      matches.push({ card: match, wasDead: dIdx >= 0 });
+    };
+    if (sameKind >= 3) {
+      for (let i = 0; i < 3; i++) takeMatch(false);
+    } else {
+      takeMatch(true);
+    }
+    p.melds.push([...matches.map((m) => m.card), card]); // 暫定公開牌組（2 或 4 張）
+    this.tentative = { seat, meldIndex: p.melds.length - 1, matches };
     this.eatHolder = seat;
     this.protectedSelfEat = false;
     this.turnSeat = seat; // 由吃牌者打一張（§7.3）
@@ -378,11 +390,13 @@ export class GameEngine {
 
   private undoTentativeEat() {
     if (!this.tentative) return;
-    const { seat, meldIndex, match, matchWasDead } = this.tentative;
+    const { seat, meldIndex, matches } = this.tentative;
     const p = this.players[seat];
-    p.melds.splice(meldIndex, 1); // 暫定對子一定是最後一個
-    p.hand.push(match);
-    if (matchWasDead) p.deadIds.unshift(match.id); // 還原死牌狀態（放回 FIFO 前端）
+    p.melds.splice(meldIndex, 1); // 暫定牌組一定是最後一個
+    for (const m of matches) {
+      p.hand.push(m.card);
+      if (m.wasDead) p.deadIds.unshift(m.card.id); // 還原死牌狀態（放回 FIFO 前端）
+    }
     this.sortHand(p);
     this.tentative = null;
     this.eatHolder = null;
@@ -945,7 +959,7 @@ export class GameEngine {
         ? {
             seat: this.eatHolder,
             card: this.pending.card,
-            matchedDeadCard: this.tentative?.matchWasDead ?? false,
+            matchedDeadCard: this.tentative?.matches.some((m) => m.wasDead) ?? false,
           }
         : null;
     // 胡牌後手動抽五隻（§9.2）：把已抽出的牌（含加頭標記）公開給前端顯示
