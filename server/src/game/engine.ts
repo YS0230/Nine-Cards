@@ -10,6 +10,9 @@
 //    依座位順序決定優先（胡 > 吃、下家優先）。
 //  - 自摸最高優先：多家聽同一張時，摸牌者能胡自己摸的牌 → 由摸牌者先決定（不限時），
 //    他家要等摸牌者胡／吃／不吃之後才有機會宣告。
+//  - 一炮多響（§9.1）：多家能胡同一張時優先權依座位順序（下家優先）。宣告者不是目前
+//    最高優先的胡家時，胡也是「暫定」的：保留一個限時窗讓更高優先者搶胡，窗結束才定案
+//    （由 gameServer 計時器呼叫 finalizeHeldWin）。
 
 import {
   buildDeck,
@@ -132,6 +135,7 @@ export class GameEngine {
   // 吃牌窗狀態
   claimOrder: number[] = []; // 依優先順序（胡>吃、下家優先）排好的可宣告座位
   eatHolder: number | null = null; // 目前暫定吃到的人（EATING 時）
+  winHolder: number | null = null; // 暫定胡牌者（一炮多響仲裁中：等更高優先者搶胡或窗結束定案）
   tentative: Tentative | null = null; // 暫定對子資訊，供被搶時還原
   claimId = 0; // 每開一個新窗 +1，供伺服器排程對齊
   claimEndsAt = 0; // 下一家可摸牌的時間點（epoch ms）
@@ -326,6 +330,7 @@ export class GameEngine {
     eaters.sort(byDistance);
     this.claimOrder = [...winners, ...eaters];
     this.eatHolder = null;
+    this.winHolder = null;
     this.tentative = null;
     this.protectedSelfEat = false;
 
@@ -386,6 +391,7 @@ export class GameEngine {
   private clearClaim() {
     this.claimOrder = [];
     this.eatHolder = null;
+    this.winHolder = null;
     this.tentative = null;
     this.claimEndsAt = 0;
     this.protectedSelfEat = false;
@@ -434,6 +440,18 @@ export class GameEngine {
     }
     // CLAIM
     const acts: ActionType[] = [];
+    // 一炮多響仲裁中（§9.1）：已有人暫定胡 → 只有優先權更高的胡家能搶胡；
+    // 吃與下家摸牌都被鎖住，窗結束由伺服器把暫定胡定案（finalizeHeldWin）
+    if (this.winHolder !== null) {
+      if (
+        this.claimOrder.includes(seat) &&
+        this.priorityIndex(seat) < this.priorityIndex(this.winHolder) &&
+        this.canWinWithPending(seat)
+      ) {
+        acts.push('declareWin');
+      }
+      return acts;
+    }
     // 自摸吃保護：只有摸牌者能行動（吃/胡不限時；或「不吃」打出摸到的牌），他家與下家都要等
     if (this.protectedSelfEat) {
       if (this.pending && seat === this.pending.fromSeat) {
@@ -615,27 +633,21 @@ export class GameEngine {
   private doDeclareWin(p: EnginePlayer): ApplyResult {
     if ((this.stage === 'CLAIM' || this.stage === 'EATING') && this.pending) {
       if (this.eatHolder !== null) this.undoTentativeEat(); // 胡牌優先，撤銷暫定吃
-      const card = this.pending.card;
-      const kind = this.pending.kind;
-      const fromSeat = this.pending.fromSeat;
-      const handBefore = [...p.hand]; // 加入胡牌張前的暗手牌（胡開判定用）
-      p.hand.push(card);
-      this.sortHand(p);
-      this.pending = null;
-      this.clearClaim();
-      if (kind === 'drawn') {
-        // 自摸或別人摸牌被胡：全體付、可抽五隻（§9.2/§11）；自摸另加一頭
-        const selfDraw = p.seat === fromSeat;
-        this.win(p.seat, selfDraw ? '自摸' : '胡（摸牌）', {
-          winningCard: card,
-          loserSeat: null,
-          handBefore,
-          selfDraw,
-        });
-      } else {
-        // 放槍：只有打牌者付、不能抽五隻
-        this.win(p.seat, '胡（放槍）', { winningCard: card, loserSeat: fromSeat, handBefore });
+      // 一炮多響（§9.1）：優先權依座位順序（下家優先）。宣告者不是目前最高優先的胡家
+      // → 先「暫定胡」並保留限時窗讓更高優先者搶胡，窗結束才定案（比照暫定吃）
+      const topWinner = this.claimOrder.find((s) => this.canWinWithPending(s));
+      if (topWinner !== undefined && topWinner !== p.seat) {
+        const opening = this.winHolder === null; // 首次宣告才重開窗；搶胡沿用原截止時間
+        this.winHolder = p.seat;
+        this.stage = 'CLAIM'; // 從 EATING 搶胡也回到 CLAIM（仲裁中）
+        if (opening) {
+          this.claimId++;
+          this.claimEndsAt = Date.now() + this.claimWindowMs;
+        }
+        this.message = `${p.name} 宣告胡牌（更高優先者仍可搶胡）`;
+        return { ok: true };
       }
+      this.finalizePendingWin(p);
       return { ok: true };
     }
     if (this.stage === 'DISCARD' && isWinningSet(this.ownedCards(p))) {
@@ -643,6 +655,38 @@ export class GameEngine {
       return { ok: true };
     }
     return { ok: false, error: '目前無法胡牌' };
+  }
+
+  // 以 pending 那張牌完成胡牌（最高優先者宣告立即定案／仲裁窗結束定案共用）
+  private finalizePendingWin(p: EnginePlayer) {
+    const card = this.pending!.card;
+    const kind = this.pending!.kind;
+    const fromSeat = this.pending!.fromSeat;
+    const handBefore = [...p.hand]; // 加入胡牌張前的暗手牌（胡開判定用）
+    p.hand.push(card);
+    this.sortHand(p);
+    this.pending = null;
+    this.clearClaim();
+    if (kind === 'drawn') {
+      // 自摸或別人摸牌被胡：全體付、可抽五隻（§9.2/§11）；自摸另加一頭
+      const selfDraw = p.seat === fromSeat;
+      this.win(p.seat, selfDraw ? '自摸' : '胡（摸牌）', {
+        winningCard: card,
+        loserSeat: null,
+        handBefore,
+        selfDraw,
+      });
+    } else {
+      // 放槍：只有打牌者付、不能抽五隻
+      this.win(p.seat, '胡（放槍）', { winningCard: card, loserSeat: fromSeat, handBefore });
+    }
+  }
+
+  // 一炮多響仲裁窗結束（由 gameServer 計時器呼叫）：無人搶胡 → 暫定胡定案
+  finalizeHeldWin(): void {
+    if (this.stage !== 'CLAIM' || this.winHolder === null || !this.pending) return;
+    if (Date.now() < this.claimEndsAt) return;
+    this.finalizePendingWin(this.players[this.winHolder]);
   }
 
   // 摸牌者放棄自摸吃（「不吃」）：其他能吃的人改用限時窗；沒有就直接落桌、換下一位

@@ -441,7 +441,8 @@ export class GameServer {
     }, delay + 30);
   }
 
-  // 開著吃牌窗時排一個計時器：兩秒到就重推狀態，讓下一家的「摸牌」按鈕變可用（不自動結算）
+  // 開著吃牌窗時排一個計時器：兩秒到就重推狀態，讓下一家的「摸牌」按鈕變可用。
+  // 唯一的自動結算是一炮多響仲裁（§9.1）：窗結束時把暫定胡定案（無仲裁時為 no-op）
   private scheduleClaim(room: Room) {
     if (room.paused) return; // 暫停中不排吃牌窗計時器（重連後由 resumeRoom 重排）
     const eng = room.engine;
@@ -458,7 +459,15 @@ export class GameServer {
     if (delay > 60_000) return; // 自摸保護：不限時，不需計時器
     room.claimTimer = setTimeout(() => {
       room.claimTimer = undefined;
-      this.broadcast?.(room);
+      const r = this.rooms.get(room.id);
+      if (!r || !r.engine) return;
+      r.engine.finalizeHeldWin(); // 一炮多響仲裁：暫定胡定案（可能進入抽五隻或結算）
+      if (r.engine.phase === 'FINISHED' && r.phase !== 'FINISHED') {
+        r.phase = 'FINISHED';
+        this.settleRound(r);
+      }
+      this.scheduleClaim(r); // 定案後 stage 已離開 CLAIM → 清掉排程狀態
+      this.broadcast?.(r);
     }, Math.max(0, delay) + 60);
   }
 

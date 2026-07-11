@@ -7,10 +7,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 九支仔 (Nine Cards) — a real-time, mobile-first multiplayer web game of a Mahjong-like
 matching card game. The authoritative game rules live in `game rule.md` (Traditional Chinese);
 read it before touching game logic. The implementation is an **MVP**: connect → deal → draw →
-discard → eat → win-on-five-pairs works end to end. Advanced rules noted in `game rule.md`
-(dead cards 死牌, tenpai announce 聽牌, draw-five 抽五隻, 胡開, color scoring, 一炮多響,
-流局 dealer-continue) are intentionally **not implemented yet** — the engine leaves extension
-points for them.
+discard → eat → win-on-five-pairs works end to end, plus the advanced rules from
+`game rule.md`: dead cards 死牌, tenpai announce 聽牌, draw-five 抽五隻, 胡開, color scoring,
+一炮多響 (held-win arbitration), 相公, and 流局 dealer-continue.
 
 ## Commands
 
@@ -85,13 +84,18 @@ the turn advances). Key rules encoded in `engine.ts` — preserve them when edit
 - Eat is **tentative until the eater discards**: a higher-priority eligible player can still `eat`
   to bump a lower-priority holder (who yields, meld reverted). Priority = hu > eat, then 下家優先
   (counter-clockwise turn order: next seat = seat−1), captured in `claimOrder`.
+- 一炮多響 arbitration: a `declareWin` from anyone **other than the highest-priority winner** is
+  also tentative (`winHolder`) — it holds a fresh timed window during which only higher-priority
+  winners may `declareWin` to take the card (eat and next-draw are locked); the claim timer calls
+  `engine.finalizeHeldWin()` at window end to finalize the held win. The top-priority winner's
+  `declareWin` finalizes immediately.
 - The **next non-xianggong player may only `draw` after the claim window (per-room seconds chosen
   at room creation, default 5000ms / `CLAIM_WINDOW_MS` env override) AND no one has claimed**;
   drawing then closes the window (unclaimed card → discard). With the room's 新手提示 (hints)
   option **off**, the window opens for every drawn/discarded card even when nobody can claim, and
   eat/hu buttons are validated server-side on press instead of being pre-enabled.
-  A server timer (`GameServer.scheduleClaim`) only re-pushes state at the window end to enable that
-  draw button — it does **not** auto-resolve.
+  A server timer (`GameServer.scheduleClaim`) re-pushes state at the window end to enable that
+  draw button; the only thing it auto-resolves is a held win (一炮多響 arbitration above).
 - **Self-draw protection (`protectedSelfEat`)**: if the drawer can **hu** their own drawn card
   (highest priority — even when other players are also waiting on that same card), or can **eat**
   it while no *other* player can hu it, the window is unlimited (`claimEndsAt = MAX_SAFE_INTEGER`),

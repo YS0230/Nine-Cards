@@ -230,6 +230,81 @@ describe('吃牌窗（tentative eat / 搶吃 / 下家摸牌）', () => {
   });
 });
 
+// 與 winningNine 不撞 id 的另一副聽 黃帥 的手牌（一炮多響用）
+const winningNineAlt = () => [
+  c('黃', '帥', 3),
+  c('紅', '仕', 3), c('紅', '仕', 4),
+  c('綠', '將', 3), c('綠', '將', 4),
+  c('白', '卒', 3), c('白', '卒', 4),
+  c('黃', '兵', 3), c('黃', '兵', 4),
+];
+
+describe('一炮多響（§9.1 多家能胡同一張 → 依座位優先，暫定胡仲裁）', () => {
+  // seat0 打出 黃帥；下家 seat3（距離 1）與 seat2（距離 2）都聽這張 → seat3 優先
+  function multiHuSetup() {
+    const eng = makeClaim(4, [3, 2], 0);
+    eng.players[3].hand = winningNine();
+    eng.players[2].hand = winningNineAlt();
+    return eng;
+  }
+
+  it('低優先胡家先按 → 暫定胡（不立即定案），高優先胡家可搶胡定案', () => {
+    const eng = multiHuSetup();
+    const r = eng.apply('2', 'declareWin');
+    expect(r.ok).toBe(true);
+    expect(eng.phase).toBe('PLAYING'); // 尚未定案，等更高優先者
+    expect(eng.winHolder).toBe(2);
+    expect(eng.legalActionsFor(3)).toContain('declareWin'); // 高優先可搶胡
+    expect(eng.legalActionsFor(2)).toEqual([]); // 暫定者只能等
+    const r2 = eng.apply('3', 'declareWin'); // 最高優先搶胡 → 立即定案
+    expect(r2.ok).toBe(true);
+    expect(eng.phase).toBe('FINISHED');
+    expect(eng.winnerSeat).toBe(3);
+  });
+
+  it('仲裁中下家不能摸牌（即使超過等待時間）', () => {
+    const eng = multiHuSetup();
+    eng.apply('2', 'declareWin');
+    eng.claimEndsAt = Date.now() - 1; // 模擬計時器尚未觸發的空窗
+    expect(eng.legalActionsFor(3)).not.toContain('draw'); // seat3 同時是下家
+  });
+
+  it('窗結束無人搶胡 → 暫定胡定案給宣告者', () => {
+    const eng = multiHuSetup();
+    eng.apply('2', 'declareWin');
+    eng.finalizeHeldWin();
+    expect(eng.phase).toBe('PLAYING'); // 時間未到 → 不定案
+    eng.claimEndsAt = Date.now() - 1;
+    eng.finalizeHeldWin();
+    expect(eng.phase).toBe('FINISHED');
+    expect(eng.winnerSeat).toBe(2);
+  });
+
+  it('最高優先胡家宣告 → 立即定案，不開仲裁窗', () => {
+    const eng = multiHuSetup();
+    const r = eng.apply('3', 'declareWin');
+    expect(r.ok).toBe(true);
+    expect(eng.phase).toBe('FINISHED');
+    expect(eng.winnerSeat).toBe(3);
+  });
+
+  it('低優先胡家搶走暫定吃 → 進入仲裁、對子還原，窗結束才定案', () => {
+    const eng = multiHuSetup();
+    eng.players[1].hand = [c('黃', '帥', 5), c('綠', '士')];
+    eng.claimOrder = [3, 2, 1]; // seat1 只能吃，排最後
+    eng.apply('1', 'eat');
+    expect(eng.stage).toBe('EATING');
+    eng.apply('2', 'declareWin'); // 低優先胡家搶吃 → 暫定胡（胡 > 吃）
+    expect(eng.stage).toBe('CLAIM');
+    expect(eng.winHolder).toBe(2);
+    expect(eng.players[1].melds).toHaveLength(0); // 暫定吃被撤銷
+    eng.claimEndsAt = Date.now() - 1;
+    eng.finalizeHeldWin();
+    expect(eng.phase).toBe('FINISHED');
+    expect(eng.winnerSeat).toBe(2);
+  });
+});
+
 // 架設「seat1 摸到 黃帥、手上已有 黃帥 可自摸吃」的情境
 function drawSetup() {
   const eng = new GameEngine(

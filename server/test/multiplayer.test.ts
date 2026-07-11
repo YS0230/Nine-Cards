@@ -131,6 +131,62 @@ describe('六人結算（§11 自摸全家付）', () => {
   });
 });
 
+describe('一炮多響仲裁（GameServer 計時器把暫定胡定案）', () => {
+  it('低優先胡家宣告後無人搶 → 窗結束自動定案、完成結算並廣播', async () => {
+    const gs = new GameServer();
+    // 吃牌窗 1 秒，讓仲裁窗在測試時間內結束
+    const host = gs.createRoom('房主', 'sock0', false, true, 1);
+    const code = host.room!.code;
+    for (let i = 1; i < 4; i++) gs.joinByCode(code, `P${i}`, `sock${i}`);
+    expect(gs.startGame(host.player!.id).ok).toBe(true);
+    const room = host.room!;
+    let broadcasts = 0;
+    gs.setBroadcaster(() => broadcasts++);
+
+    // 直接把引擎架成「seat0 打出黃帥、seat3（下家）與 seat2 都聽這張」的吃牌窗
+    const eng = room.engine!;
+    eng.phase = 'PLAYING';
+    eng.stage = 'CLAIM';
+    eng.dealerSeat = 0;
+    eng.turnSeat = 0;
+    eng.players[0].hand = [c('綠', '士', 9)];
+    eng.players[1].hand = neutralHand(1);
+    // 三色（黃紅綠）聽黃帥的手牌：避免湊成四色 0 頭，結算才看得出付款
+    eng.players[2].hand = [
+      c('黃', '帥', 2),
+      c('紅', '仕'), c('紅', '仕', 2),
+      c('綠', '將'), c('綠', '將', 2),
+      c('黃', '兵'), c('黃', '兵', 2),
+      c('紅', '卒'), c('紅', '卒', 2),
+    ];
+    eng.players[3].hand = [
+      c('黃', '帥', 3),
+      c('紅', '仕', 3), c('紅', '仕', 4),
+      c('綠', '將', 3), c('綠', '將', 4),
+      c('白', '卒', 3), c('白', '卒', 4),
+      c('黃', '兵', 3), c('黃', '兵', 4),
+    ];
+    eng.pending = { card: c('黃', '帥', 9), fromSeat: 0, kind: 'discard' };
+    eng.claimOrder = [3, 2];
+    eng.claimEndsAt = Date.now() + 999_999;
+    eng.discardPile = [];
+
+    // 低優先的 seat2 宣告胡 → 暫定胡、開 1 秒仲裁窗（timer 由 action() 排程）
+    const p2 = room.players[2];
+    expect(gs.action(p2.id, 'declareWin').ok).toBe(true);
+    expect(eng.winHolder).toBe(2);
+    expect(room.phase).toBe('PLAYING'); // 尚未定案
+
+    await new Promise((r) => setTimeout(r, 1300)); // 等仲裁窗（1s + 60ms 緩衝）結束
+    expect(eng.phase).toBe('FINISHED');
+    expect(eng.winnerSeat).toBe(2);
+    expect(room.phase).toBe('FINISHED');
+    expect(room.settled).toBe(true); // 計時器定案後有跑結算
+    expect(room.scores.get(p2.id)).toBeGreaterThan(0);
+    expect(broadcasts).toBeGreaterThan(0); // 定案後有推播新狀態
+  });
+});
+
 describe('房間人數上限（建房選項 2–8）', () => {
   it('六人房：第六位可加入、第七位被拒', () => {
     const gs = new GameServer();
