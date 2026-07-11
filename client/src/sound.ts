@@ -32,6 +32,9 @@ const EFFECT_SOUND = {
   drawFive: 'chou',
 } as const;
 export type EffectKind = keyof typeof EFFECT_SOUND;
+// 吃牌小彩蛋：3% 機率改播「吃吃」
+const EAT_EASTER_EGG_SOUND = 'chichi';
+const EAT_EASTER_EGG_CHANCE = 0.03;
 
 // 每個音檔約 1 秒但發聲只佔一小段；先掃出實際發聲區間，播放時去掉頭尾靜音
 interface VoiceClip {
@@ -52,6 +55,7 @@ function unlock() {
     ...Object.values(COLOR_SOUND),
     ...Object.values(RANK_SOUND),
     ...Object.values(EFFECT_SOUND),
+    EAT_EASTER_EGG_SOUND,
   ];
   for (const name of new Set(all)) void loadBuffer(name);
   if (ctx.state === 'running') {
@@ -98,7 +102,11 @@ export function playCardVoice(card: Card): Promise<void> {
 
 /** 動作音效：吃／聽／胡。與報牌共用同一條播放佇列，不會疊音。 */
 export function playEffect(kind: EffectKind): Promise<void> {
-  return playNames([EFFECT_SOUND[kind]]);
+  const name =
+    kind === 'eat' && Math.random() < EAT_EASTER_EGG_CHANCE
+      ? EAT_EASTER_EGG_SOUND
+      : EFFECT_SOUND[kind];
+  return playNames([name]);
 }
 
 async function playNames(names: string[]): Promise<void> {

@@ -27,6 +27,7 @@ const FILES = {
   兵: 'bing',
   卒: 'zu',
   吃: 'chi',
+  吃吃: 'chichi',
   聽: 'ting',
   胡: 'hu',
   死牌: 'sipai',
