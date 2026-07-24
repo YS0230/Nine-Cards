@@ -135,6 +135,58 @@ body {
   margin: 0;
   opacity: 0.75;
 }
+/* 等待室：改成「上捲動區＋下固定 footer」兩段，主要動作永遠看得到 */
+.waiting {
+  padding: 0;
+  gap: 0;
+  overflow: hidden;
+}
+.waiting-scroll {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 24px;
+}
+/* 收緊預設外距，讓常見手機高度一屏放得下（含聊天輸入列） */
+.waiting-scroll h2,
+.waiting-scroll .seat-list {
+  margin: 4px 0;
+}
+/* 矮螢幕（如 iPhone SE）：再壓縮間距與座位列，避免聊天輸入列被擠出畫面 */
+@media (max-height: 700px) {
+  .waiting-scroll {
+    gap: 8px;
+    padding: 8px 20px;
+  }
+  .waiting-scroll .seat-list {
+    gap: 6px;
+  }
+  .waiting-scroll .seat {
+    padding: 9px 14px;
+  }
+}
+/* 等待室主要動作（開始遊戲／等待提示）：捲動區外的固定 footer */
+.waiting-action {
+  flex: none;
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  padding: 10px 24px 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.15);
+}
+.waiting-action .btn {
+  width: 100%;
+  max-width: 420px;
+}
+.waiting-action .hint {
+  margin: 4px 0;
+}
 .menu {
   display: flex;
   flex-direction: column;
@@ -1338,35 +1390,40 @@ body {
   text-align: center;
 }
 
-/* 浮動面板（牌桌）：從 header 下方展開，避開下方手牌與動作列；
+/* 浮動面板（牌桌）：從 header 下方展開，固定高度不隨訊息數跳動；
+   輸入列落在畫面中段，行動裝置鍵盤彈出也不會蓋住；
    z-index 24：高於結算 overlay(20)，低於暫停(26)/結束(28)/toast(30) */
 .chat-panel {
   position: absolute;
   top: 44px;
   left: 8px;
   right: 8px;
-  max-height: 48%;
+  height: min(48%, 380px);
   display: flex;
   flex-direction: column;
-  background: rgba(10, 26, 20, 0.92);
+  background: rgba(10, 26, 20, 0.94);
   border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
   z-index: 24;
 }
-/* 等待室常駐模式：佔版面、固定高度 */
+/* 等待室常駐模式：佔版面，吃掉畫面剩餘空間（最少 180px） */
 .chat-panel.inline {
   position: static;
   width: 100%;
   max-width: 420px;
-  height: 200px;
-  max-height: none;
+  height: auto;
+  flex: 1 1 auto;
+  min-height: 120px; /* 螢幕高度夠時由 flex 自動長高；小螢幕保底一列訊息＋輸入列 */
+  max-height: 420px;
+  box-shadow: none;
   text-align: left;
 }
 .chat-head {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 6px 10px;
+  padding: 6px 6px 6px 12px;
   font-size: 14px;
   font-weight: 700;
   border-bottom: 1px solid rgba(255, 255, 255, 0.12);
@@ -1375,17 +1432,24 @@ body {
   border: none;
   background: none;
   color: var(--paper);
-  font-size: 14px;
-  padding: 2px 6px;
+  font-size: 16px;
+  padding: 6px 12px; /* 加大點擊範圍，手機好按 */
+}
+/* 訊息區外框：「↓ 新訊息」提示的定位基準 */
+.chat-log-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 60px;
+  display: flex;
+  flex-direction: column;
 }
 .chat-log {
   flex: 1;
-  min-height: 60px;
   overflow-y: auto;
-  padding: 8px 10px;
+  padding: 10px 12px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 10px;
 }
 .chat-empty {
   color: rgba(255, 255, 255, 0.45);
@@ -1393,24 +1457,59 @@ body {
   text-align: center;
   margin: auto;
 }
-.chat-msg {
-  font-size: 14px;
-  line-height: 1.35;
-  word-break: break-word;
+/* 同一人連續發言成一組：名字/時間只標一次，氣泡靠同側排 */
+.chat-group {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  max-width: 85%;
   align-self: flex-start;
-  max-width: 90%;
 }
-.chat-msg.mine {
+.chat-group.mine {
   align-self: flex-end;
-  text-align: right;
+  align-items: flex-end;
+}
+.chat-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 0 4px;
 }
 .chat-name {
   color: var(--gold);
   font-weight: 700;
-  margin-right: 6px;
+  font-size: 12px;
 }
-.chat-msg.mine .chat-name {
-  color: var(--ok);
+.chat-time {
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 11px;
+}
+.chat-msg {
+  font-size: 14px;
+  line-height: 1.35;
+  word-break: break-word;
+  padding: 6px 10px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.1);
+}
+.chat-group.mine .chat-msg {
+  background: #1c6b47; /* 自己的訊息：深綠底，右側對齊 */
+}
+/* 往回看歷史時來了新訊息：底部浮出跳到最底的按鈕，不強制拉走視角 */
+.chat-new {
+  position: absolute;
+  left: 50%;
+  bottom: 8px;
+  transform: translateX(-50%);
+  border: none;
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  background: var(--gold);
+  color: var(--ink);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
 }
 .chat-input-row {
   display: flex;

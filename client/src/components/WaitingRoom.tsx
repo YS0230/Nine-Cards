@@ -12,6 +12,8 @@ export function WaitingRoom({ api }: { api: GameApi }) {
 
   return (
     <div className="waiting">
+      {/* 捲動區：房間資訊＋座位＋聊天；主要動作鈕獨立釘在下方 footer，不會被擠出畫面 */}
+      <div className="waiting-scroll">
       <button className="btn ghost back" onClick={api.leave}>
         ← 離開
       </button>
@@ -51,13 +53,18 @@ export function WaitingRoom({ api }: { api: GameApi }) {
         inline
       />
 
-      {isHost ? (
-        <button className="btn primary" disabled={!canStart} onClick={api.startGame}>
-          {occupied < 2 ? '等待玩家加入…' : '開始遊戲'}
-        </button>
-      ) : (
-        <p className="hint">等待房主開始遊戲…</p>
-      )}
+      </div>
+
+      {/* 開始鈕／等待提示：捲動區外的固定 footer，內容再長也不用往下捲才找得到 */}
+      <div className="waiting-action">
+        {isHost ? (
+          <button className="btn primary" disabled={!canStart} onClick={api.startGame}>
+            {occupied < 2 ? '等待玩家加入…' : '開始遊戲'}
+          </button>
+        ) : (
+          <p className="hint">等待房主開始遊戲…</p>
+        )}
+      </div>
     </div>
   );
 }

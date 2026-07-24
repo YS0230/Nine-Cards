@@ -430,7 +430,7 @@ export function Table({ api }: { api: GameApi }) {
         </div>
       )}
 
-      {/* 聊天浮動面板：掛在 .table 層（2D/3D 共用），貼在手牌區上方 */}
+      {/* 聊天浮動面板：掛在 .table 層（2D/3D 共用），從頂欄下方展開，避開下方手牌與動作列 */}
       {chatOpen && (
         <ChatPanel
           messages={api.chat}
